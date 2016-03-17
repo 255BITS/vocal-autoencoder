@@ -11,8 +11,9 @@ from numpy.fft import hfft, ihfft, fft, ifft
 
 
 TRAIN_REPEAT=100
-DIMS=[32, 8, 32]
-SIZE=1024
+DIMS=[128,64]
+#SIZE=1024*8
+SIZE=8*1024
 
 def create(x, layer_sizes):
 
@@ -73,32 +74,33 @@ def deep_test():
 
         x = tf.placeholder("float", [None, SIZE])
         autoencoder = create(x, DIMS)
+        #train_step = tf.train.GradientDescentOptimizer(3.0).minimize(autoencoder['cost'])
+        train_step = tf.train.AdamOptimizer(1e-3).minimize(autoencoder['cost'])
         init = tf.initialize_all_variables()
         sess.run(init)
         saver = tf.train.Saver()
         saver.save(sess, 'model.ckpt')
-        train_step = tf.train.GradientDescentOptimizer(3.0).minimize(autoencoder['cost'])
 
 
         #output = irfft(filtered)
 
         #write('output.wav', rate, output)
 
+    
 
 
         for k in range(TRAIN_REPEAT):
+            batch = []
             # do 1000 training steps
-            for i in range(len(transformed)/SIZE):
+            for i in range(int(len(transformed)/SIZE)):
                     # Our dataset consists of two centers with gaussian noise w/ sigma = 0.1
                     c1 = transformed[i*SIZE:i*SIZE+SIZE]
-                    batch = [c1]
-                    sess.run(train_step, feed_dict={x: np.array(batch)})
-                    if i % 1000 == 1:
-                            saver.save(sess, 'model.ckpt')
-                            print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
-                            #print(i, " original", batch[0])
-                            #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
-            print(k)
+                    batch += [c1]
+            sess.run(train_step, feed_dict={x: np.array(batch)})
+            print(k, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
+            #print(i, " original", batch[0])
+            #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
+        saver.save(sess, 'model.ckpt')
 
 def deep_gen():
         sess = tf.Session()
@@ -126,31 +128,30 @@ def deep_gen():
 
         filtered = np.array([])
         # do 1000 training steps
-        for i in range(len(transformed)/SIZE):
-		if(i>1000):
-		    break;
+        batch = []
+        # do 1000 training steps
+        for i in range(int(len(transformed)/SIZE)):
                 # Our dataset consists of two centers with gaussian noise w/ sigma = 0.1
                 c1 = transformed[i*SIZE:i*SIZE+SIZE]
-                batch = [c1]
-                decoded = sess.run(autoencoder['decoded'], feed_dict={x: np.array(batch)})
-                ded = decoded.ravel()
-                #filtered = np.append(filtered, batch)
-                filtered = np.append(filtered,ded)
-                if i % 100 == 1:
-			print(filtered)
-                        print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
-                        #print(i, " original", batch[0])
-                        #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
+                batch += [c1]
 
-	output = irfft(filtered * transformed_raw.max(axis=0))
-	write('output.wav', rate, np.array(output, dtype=np.int16))
+        decoded = sess.run(autoencoder['decoded'], feed_dict={x: np.array(batch)})
+        ded = decoded.ravel()
+        #filtered = np.append(filtered, batch)
+        filtered = np.append(filtered,ded)
+        print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
+        #print(i, " original", batch[0])
+        #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
+
+        output = irfft(filtered * transformed_raw.max(axis=0))
+        write('output.wav', rate, np.array(output, dtype=np.int16))
                        
 if __name__ == '__main__':
     if(sys.argv[1] == 'train'):
-	print("Train")
-	deep_test()
+        print("Train")
+        deep_test()
     else:
-	print("Generate")
-	deep_gen()
+        print("Generate")
+        deep_gen()
 
 
