@@ -3,10 +3,15 @@ import numpy as np
 import math
 import random
 
+import sys
+
 from scipy.io.wavfile import read, write
 from scipy.fftpack import rfft, irfft
+from numpy.fft import hfft, ihfft, fft, ifft
 
-DIMS=[256, 128]
+
+TRAIN_REPEAT=100
+DIMS=[32, 8, 32]
 SIZE=1024
 
 def create(x, layer_sizes):
@@ -60,8 +65,10 @@ def deep_test():
         sess = tf.Session()
         rate, input = read('input.wav')
 
-        transformed_raw = np.array(rfft(input))
+        transformed_raw = np.array(rfft(input), dtype=np.float32)
         transformed = transformed_raw / transformed_raw.max(axis=0)
+
+
 
 
         x = tf.placeholder("float", [None, SIZE])
@@ -79,7 +86,7 @@ def deep_test():
 
 
 
-        for k in range(100):
+        for k in range(TRAIN_REPEAT):
             # do 1000 training steps
             for i in range(len(transformed)/SIZE):
                     # Our dataset consists of two centers with gaussian noise w/ sigma = 0.1
@@ -89,8 +96,8 @@ def deep_test():
                     if i % 1000 == 1:
                             saver.save(sess, 'model.ckpt')
                             print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
-                            print(i, " original", batch[0])
-                            print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
+                            #print(i, " original", batch[0])
+                            #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
             print(k)
 
 def deep_gen():
@@ -102,10 +109,9 @@ def deep_gen():
         transformed = transformed_raw / transformed_raw.max(axis=0)
 
         output = irfft(transformed)
-        print(input)
-        print(output)
+        san_output = irfft(transformed)* transformed_raw.max(axis=0)
 
-        #write('sanity.wav', rate, np.array(output, dtype=np.float32))
+        write('sanity.wav', rate, np.array(san_output, dtype=np.int16))
 
         x = tf.placeholder("float", [None, SIZE])
         autoencoder = create(x, DIMS)
@@ -133,14 +139,18 @@ def deep_gen():
                 if i % 100 == 1:
 			print(filtered)
                         print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
-                        print(i, " original", batch[0])
-                        print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
+                        #print(i, " original", batch[0])
+                        #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
 
 	output = irfft(filtered * transformed_raw.max(axis=0))
-	write('output.wav', rate, np.array(output, dtype=np.float32))
+	write('output.wav', rate, np.array(output, dtype=np.int16))
                        
 if __name__ == '__main__':
-        deep_test()
-	#deep_gen()
+    if(sys.argv[1] == 'train'):
+	print("Train")
+	deep_test()
+    else:
+	print("Generate")
+	deep_gen()
 
 
