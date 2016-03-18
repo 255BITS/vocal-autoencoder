@@ -5,11 +5,9 @@ import random
 
 import sys
 
-from scipy.io.wavfile import read, write
-from scipy.fftpack import rfft, irfft
-from numpy.fft import hfft, ihfft, fft, ifft
 import os
 
+from wav import loadfft, savefft, sanity
 
 TRAIN_REPEAT=100
 DIMS=[256,64]
@@ -87,11 +85,10 @@ def deep_test():
         
 
 def learn(filename, sess, train_step, x, k, autoencoder, saver):
-        rate, input = read(filename)
-
-        transformed_raw = np.array(rfft(input), dtype=np.float32)
-        transformed = transformed_raw / transformed_raw.max(axis=0)
-
+        wavobj = loadfft(filename)
+        transformed = wavobj['transformed']
+        transformed_raw = wavobj['raw']
+        rate = wavobj['rate']
 
         batch = []
         # do 1000 training steps
@@ -106,16 +103,9 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
 
 def deep_gen():
         sess = tf.Session()
-        rate, input = read('input.wav')
-
-        rfftx = rfft(input)
-        transformed_raw = np.array(rfftx, dtype=np.float32)
-        transformed = transformed_raw / transformed_raw.max(axis=0)
-
-        output = irfft(transformed)
-        san_output = irfft(transformed)* transformed_raw.max(axis=0)
-
-        write('sanity.wav', rate, np.array(san_output, dtype=np.int16))
+        wavobj = loadfft('input.wav')
+        sanity(wavobj)
+        transformed = wavobj['transformed']
 
         x = tf.placeholder("float", [None, SIZE], name='x')
         autoencoder = create(x, DIMS)
@@ -145,9 +135,7 @@ def deep_gen():
         #print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
         #print(i, " original", batch[0])
         #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
-        data = filtered * transformed_raw.max(axis=0)
-        output = irfft(data)
-        write('output.wav', rate, np.array(output, dtype=np.int16))
+        savefft('output.wav', wavobj, filtered)
                        
 if __name__ == '__main__':
     if(sys.argv[1] == 'train'):
