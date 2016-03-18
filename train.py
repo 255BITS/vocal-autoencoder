@@ -12,9 +12,9 @@ import os
 
 
 TRAIN_REPEAT=100
-DIMS=[64,16]
+DIMS=[256,64]
 #SIZE=256
-SIZE=64
+SIZE=128
 
 def create(x, layer_sizes):
 
@@ -66,7 +66,7 @@ def create(x, layer_sizes):
 def deep_test():
         sess = tf.Session()
 
-        x = tf.placeholder("float", [None, SIZE])
+        x = tf.placeholder("float", [None, SIZE],name='x')
         autoencoder = create(x, DIMS)
         #train_step = tf.train.GradientDescentOptimizer(3.0).minimize(autoencoder['cost'])
         train_step = tf.train.AdamOptimizer(1e-3).minimize(autoencoder['cost'])
@@ -117,7 +117,7 @@ def deep_gen():
 
         write('sanity.wav', rate, np.array(san_output, dtype=np.int16))
 
-        x = tf.placeholder("float", [None, SIZE])
+        x = tf.placeholder("float", [None, SIZE], name='x')
         autoencoder = create(x, DIMS)
         init = tf.initialize_all_variables()
         sess.run(init)
