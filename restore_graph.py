@@ -86,7 +86,7 @@ def restore_graph(graph_def, save_path=None,
     print(res)
     restored_vars = []
     for node in graph_def.node:
-        print(node.name)
+        print(node.name, node.op)
         if node.op == 'Variable':
             restored_vars.append(RestoredVariable(node.name, trainable=trainable, collections=collections))
     

@@ -25,7 +25,7 @@ def deep_test():
                 graph_def,
                 "model.ckpt",
             )
-        x =  sess.graph.get_tensor_by_name('Placeholder:0')#tf.placeholder("float", [None, SIZE], name='x')
+        x =  sess.graph.get_tensor_by_name('x:0')#tf.placeholder("float", [None, SIZE], name='x')
         node = sess.graph.get_tensor_by_name('encoder-0:0')
         out = sess.run(node, feed_dict={x:[np.random.normal(0,1, [SIZE])]}) 
         print(out)
