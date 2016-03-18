@@ -43,7 +43,9 @@ cell = rnn_cell.GRUCell(memory_dim)
 dec_outputs, dec_memory = seq2seq.basic_rnn_seq2seq(
     enc_inp, dec_inp, cell)
 
-loss = seq2seq.sequence_loss(dec_outputs, labels, weights, vocab_size)
+labels_t = [tf.reshape(labels, [-1])]
+print(labels_t)
+loss = seq2seq.sequence_loss(dec_outputs, labels_t, weights, vocab_size)
 tf.scalar_summary("loss", loss)
 #magnitude = tf.sqrt(tf.reduce_sum(tf.square(dec_memory[1])))
 #tf.scalar_summary("magnitude at t=1", magnitude)
