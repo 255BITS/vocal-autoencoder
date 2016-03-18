@@ -12,9 +12,9 @@ import os
 
 
 TRAIN_REPEAT=100
-DIMS=[256,16,16,256]
-SIZE=256
-#SIZE=64
+DIMS=[64,16]
+#SIZE=256
+SIZE=64
 
 def create(x, layer_sizes):
 
@@ -22,7 +22,7 @@ def create(x, layer_sizes):
         next_layer_input = x
 
         encoding_matrices = []
-        for dim in layer_sizes:
+        for i, dim in enumerate(layer_sizes):
                 input_dim = int(next_layer_input.get_shape()[1])
 
                 # Initialize W using random values in interval [-1/sqrt(n) , 1/sqrt(n)]
@@ -34,7 +34,7 @@ def create(x, layer_sizes):
                 # We are going to use tied-weights so store the W matrix for later reference.
                 encoding_matrices.append(W)
 
-                output = tf.nn.tanh(tf.matmul(next_layer_input,W) + b)
+                output = tf.nn.tanh(tf.matmul(next_layer_input,W) + b,name='encoder-'+str(i))
 
                 # the input into the next layer is the output of this layer
                 next_layer_input = output
@@ -75,14 +75,16 @@ def deep_test():
         saver = tf.train.Saver()
         saver.save(sess, 'model.ckpt')
 
+        tf.train.write_graph(sess.graph_def, 'log', 'model.pbtxt', False)
 
         #output = irfft(filtered)
         i=0
         #write('output.wav', rate, output)
-        for file in os.listdir('training'):
-            i+=1
-            learn('training/'+file, sess, train_step, x,i, autoencoder, saver)
-    
+        for trains in range(TRAIN_REPEAT):
+            for file in os.listdir('training'):
+                i+=1
+                learn('training/'+file, sess, train_step, x,i, autoencoder, saver)
+        
 
 def learn(filename, sess, train_step, x, k, autoencoder, saver):
         rate, input = read(filename)
