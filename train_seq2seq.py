@@ -43,8 +43,9 @@ cell = rnn_cell.GRUCell(memory_dim)
 dec_outputs, dec_memory = seq2seq.basic_rnn_seq2seq(
     enc_inp, dec_inp, cell)
 
-labels_t = [tf.reshape(labels, [-1])]
+labels_t = tf.reshape(labels, [5,100])
 print(labels_t)
+print(dec_outputs)
 loss = seq2seq.sequence_loss(dec_outputs, labels_t, weights, vocab_size)
 tf.scalar_summary("loss", loss)
 #magnitude = tf.sqrt(tf.reduce_sum(tf.square(dec_memory[1])))
@@ -75,7 +76,7 @@ def train_batch(X, Y):
 
 
 i=0
-for file in os.listdir('training'):
+for file in glob.glob('training/*.wav'):
     i+=1
     filename = 'training/'+file
     wavobj = loadfft(filename)

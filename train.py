@@ -6,13 +6,14 @@ import random
 import sys
 
 import os
+import glob
 
 from wav import loadfft, savefft, sanity
 
-TRAIN_REPEAT=100
-DIMS=[256,64]
+TRAIN_REPEAT=1
+DIMS=[512,256]
 #SIZE=256
-SIZE=128
+SIZE=64
 
 def create(x, layer_sizes):
 
@@ -79,9 +80,9 @@ def deep_test():
         i=0
         #write('output.wav', rate, output)
         for trains in range(TRAIN_REPEAT):
-            for file in os.listdir('training'):
+            for file in glob.glob('training/*.wav'):
                 i+=1
-                learn('training/'+file, sess, train_step, x,i, autoencoder, saver)
+                learn(file, sess, train_step, x,i, autoencoder, saver)
         
 
 def learn(filename, sess, train_step, x, k, autoencoder, saver):

@@ -4,11 +4,18 @@ from numpy.fft import hfft, ihfft, fft, ifft
 import numpy as np
 
 def loadfft(wavfile):
-    rate, input = read('input.wav')
+    print("reading file")
+    rate, input = read(wavfile)
 
-    rfftx = rfft(input)
+    print("computing rfft "+str(len(input)))
+    rfftx = rfft(input, int(int(len(input)/2)*2))
+    print("conputing transformed_raw")
     transformed_raw = np.array(rfftx, dtype=np.float32)
+    print("conputing transformed")
     transformed = transformed_raw / transformed_raw.max(axis=0)
+    print("conputing done")
+    print(rate)
+    print(len(transformed))
 
     return {
             "transformed": transformed,
@@ -34,6 +41,8 @@ def savefft(wavfile, wavobj, filtered):
     output = irfft(data)
     write(wavfile, rate, np.array(output, dtype=np.int16))
 
+def loadfft2(wav):
+    return loadfft(wav)
 
-
-
+def savefft2(wav, wavobj, filtered):
+    return savefft(wav, wavobj, filtered)
