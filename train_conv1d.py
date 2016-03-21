@@ -10,21 +10,31 @@ import glob
 
 from wav import loadfft2, savefft2, sanity
 
+
 TRAIN_REPEAT=1
-SIZE=32
+SIZE=64
 DEPTH=1
 LEARNING_RATE = 1e-1
 #BATCH_SIZE=349
 layers = [
+    #{
+    #    'type': 'autoencoder',
+    #    'output_dim': 32
+    #},
+    #{
+    #    'type': 'autoencoder',
+    #    'output_dim': 24
+    #},
     {
-        'type': 'conv1d',
-        'filter':[2, 1, DEPTH*2],
-        'stride':[1,2,2,1],
-        'padding':"SAME"
+        'type': 'feed_forward_nn',
     },
-    {
-        'type': 'autoencoder',
-    },
+    #{
+    #    'type': 'conv1d',
+    #    'filter':[2, 1, DEPTH*2],
+    #    'stride':[1,2,2,1],
+    #    'padding':"SAME"
+    #},
+
 
 
 ]
@@ -50,7 +60,8 @@ def conv1d(input, layer_def, nextMethod):
     padding = layer_def['padding']
     stride =layer_def['stride']
     print('in shape', input.get_shape())
-    input_t = tf.transpose(input, [0,1,2])
+
+    input_t = tf.transpose(tf.reshape(input, [-1, int(input.get_shape()[1]), 1]), [0,1,2])
     print('in_t shape', input_t.get_shape())
     #filter_t = tf.transpose(filter_normal, [1,0,2])
     expand_input = tf.expand_dims(input_t, 1)
@@ -137,17 +148,20 @@ def max_pool(img, k):
 
 def autoencoder(input, layer_def, nextMethod):
     input_dim = int(input.get_shape()[1])
+    output_dim = layer_def['output_dim']
     print("-- Begin autoencoder", input_dim, input.get_shape())
-    W = tf.Variable(tf.random_uniform([input_dim, input_dim], -1.0 / math.sqrt(input_dim), 1.0 / math.sqrt(input_dim)))
+    W = tf.Variable(tf.random_uniform([input_dim, output_dim], -1.0 / math.sqrt(input_dim), 1.0 / math.sqrt(input_dim)))
     # Initialize b to zero
-    b = tf.Variable(tf.zeros([input_dim]))
+    b = tf.Variable(tf.zeros([output_dim]))
     output = tf.nn.tanh(tf.matmul(tf.reshape(input, [-1,input_dim]),W) + b)
 
     print("autoencoder", output.get_shape())
     inner_layer = nextMethod(output)
+    inner_layer = tf.reshape(inner_layer, [-1, output_dim])
 
     W2 = tf.transpose(W)
     b2 = tf.Variable(tf.zeros([input_dim]))
+    print("autoencoder 2", inner_layer.get_shape(), W2.get_shape(), b2)
     return tf.nn.tanh(tf.matmul(inner_layer,W2) + b2)
 
 
@@ -190,8 +204,9 @@ def deep_test():
 
         x = get_input()
         autoencoder = create(x)
-        #train_step = tf.train.GradientDescentOptimizer(3.0).minimize(autoencoder['cost'])
+        #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
         train_step = tf.train.AdamOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
+        #train_step = None
         init = tf.initialize_all_variables()
         sess.run(init)
         saver = tf.train.Saver()
@@ -206,20 +221,16 @@ def deep_test():
             for file in glob.glob('training/*.wav'):
                 i+=1
                 learn(file, sess, train_step, x,i, autoencoder, saver)
-                if(i%100 == 1):
-                    saver.save(sess, 'model1.ckpt')
+        saver.save(sess, 'model1.ckpt')
         
 
 def collect_input(data, dims):
     slice_size = dims[0]*dims[1]
     length = len(data)
-    print("max batch size is:", int(length/SIZE))
     # discard extra info
     arr= np.array(data[0:int(length/SIZE)*SIZE])
 
-    print('collect reshape', np.shape(arr))
     reshaped =  arr.reshape((-1, dims[0], dims[1]))
-    print('collect reshape done')
     return reshaped
 def learn(filename, sess, train_step, x, k, autoencoder, saver):
         print("Loading "+filename)
@@ -229,10 +240,11 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
         rate = wavobj['rate']
 
         input_squares = collect_input(transformed, [SIZE, DEPTH])
+        print("wav size", len(input_squares))
         #print(input_squares)
         print("Running " + filename + str(np.shape(input_squares)[0]))
         sess.run(train_step, feed_dict={x: input_squares})
-        print(k,filename, " cost", sess.run(autoencoder['cost'], feed_dict={x: input_squares}))
+        #print(k,filename, " cost", sess.run(autoencoder['cost'], feed_dict={x: input_squares}))
         print("Finished " + filename)
         #print(i, " original", batch[0])
         #print( " decoded", sess.run(autoencoder['conv2'], feed_dict={x: input_squares}))
@@ -266,7 +278,7 @@ def deep_gen():
         #print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
         #print(i, " original", batch[0])
         #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
-        savefft2('output.wav', wavobj, filtered)
+        savefft2('output2.wav', wavobj, filtered)
                        
 if __name__ == '__main__':
     if(sys.argv[1] == 'train'):

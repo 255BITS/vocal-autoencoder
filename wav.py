@@ -9,18 +9,12 @@ def best_length_fft(n):
     return int(int(n/2)*2)
     #return math.pow(2, max(factorint(n)))
 def loadfft(wavfile):
-    print("reading file")
     rate, input = read(wavfile)
 
     max_size = best_length_fft(len(input))
-    print("computing rfft ",max_size)
     rfftx = rfft(input, max_size)
     transformed_raw = np.array(rfftx, dtype=np.float32)
-    print("conputing transformed_raw", len(transformed_raw))
     transformed = transformed_raw / transformed_raw.max(axis=0)
-    print("conputing done")
-    print(rate)
-    print(len(transformed))
 
     return {
             "transformed": transformed,
