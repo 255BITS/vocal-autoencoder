@@ -14,9 +14,35 @@ from wav import loadfft2, savefft2, sanity
 TRAIN_REPEAT=1
 SIZE=64
 DEPTH=1
-LEARNING_RATE = 1e-1
+LEARNING_RATE = 7e-5
 #BATCH_SIZE=349
 layers = [
+    {
+        'type':'conv1d',
+        'filter':[2, 1, DEPTH*2],
+        'stride':[1,2,2,1],
+        'padding':"SAME"
+    },
+    {
+        'type':'conv1d',
+        'filter':[2, 2, DEPTH*4],
+        'stride':[1,2,2,1],
+        'padding':"SAME"
+    },
+    {
+        'type':'conv1d',
+        'filter':[2, 4, DEPTH*8],
+        'stride':[1,2,2,1],
+        'padding':"SAME"
+    },
+    #{
+    #    'type':'conv1d',
+    #    'filter':[2, 32, DEPTH*64],
+    #    'stride':[1,2,2,1],
+    #    'padding':"SAME"
+    #},
+
+>>>>>>> [fix] actually emitting sound now
     #{
     #    'type': 'autoencoder',
     #    'output_dim': 32
@@ -67,7 +93,8 @@ def conv1d(input, layer_def, nextMethod):
     expand_input = tf.expand_dims(input_t, 1)
     expand_filter = filter_normal
     #expand_filter = tf.expand_dims(filter_t, 0)
-    add_layer=tf.tile(expand_input, [1,2,1,1])
+    #add_layer=tf.tile(expand_input, [1,2,1,1])
+    add_layer=tf.zeros_like(expand_input)
     print('shapes:')
     print('add layer', add_layer.get_shape())
     print('expand input', expand_input.get_shape())
@@ -81,9 +108,10 @@ def conv1d(input, layer_def, nextMethod):
     conv = tf.nn.conv2d(expand_input_add, expand_filter, stride, padding=padding)
     print("conv:", conv.get_shape())
     #conv = max_pool(conv, 2)
-    conv = tf.nn.dropout(conv, 0.75)
-    slice= tf.slice(conv, [0,0,0,0], [-1, 1, -1, -1])
-    squeeze = tf.squeeze(slice, squeeze_dims=[1])
+    #conv = tf.nn.dropout(conv, 0.75)
+    #slice= tf.slice(conv, [0,0,0,0], [-1, 1, -1, -1])
+    #squeeze = tf.squeeze(slice, squeeze_dims=[1])
+    squeeze = tf.squeeze(conv, squeeze_dims=[1])
     print("Squeeze:", squeeze.get_shape())
 
     biases = tf.Variable(tf.zeros([squeeze.get_shape()[-1]]))
@@ -191,7 +219,7 @@ def create(x):
     reconstructed_x = tf.reshape(decoded, [-1, SIZE,DEPTH])
     print("Completed reshaping")
     #results["decoded"]=reconstructed_x
-    results['decoded']=decoded
+    results['decoded']=tf.reshape(decoded, [-1])
     results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(x-reconstructed_x)))
     #results['arranged']= arranged_prev_layer
     #results['transposed']= conv_transposed
@@ -233,7 +261,7 @@ def collect_input(data, dims):
     reshaped =  arr.reshape((-1, dims[0], dims[1]))
     return reshaped
 def learn(filename, sess, train_step, x, k, autoencoder, saver):
-        print("Loading "+filename)
+        #print("Loading "+filename)
         wavobj = loadfft2(filename)
         transformed = wavobj['transformed']
         transformed_raw = wavobj['raw']
@@ -242,10 +270,10 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
         input_squares = collect_input(transformed, [SIZE, DEPTH])
         print("wav size", len(input_squares))
         #print(input_squares)
-        print("Running " + filename + str(np.shape(input_squares)[0]))
+        #print("Running " + filename + str(np.shape(input_squares)[0]))
         sess.run(train_step, feed_dict={x: input_squares})
-        #print(k,filename, " cost", sess.run(autoencoder['cost'], feed_dict={x: input_squares}))
-        print("Finished " + filename)
+        print(k,filename, " cost", sess.run(autoencoder['cost'], feed_dict={x: input_squares}))
+        #print("Finished " + filename)
         #print(i, " original", batch[0])
         #print( " decoded", sess.run(autoencoder['conv2'], feed_dict={x: input_squares}))
 
@@ -265,14 +293,13 @@ def deep_gen():
 
 
         batch = collect_input(transformed, [SIZE, DEPTH])
-        print('np.shape(bat', np.shape(batch))
+        #print('np.shape(bat', np.shape(batch))
         batch_copy = collect_input(transformed, [SIZE, DEPTH])
-        filtered = np.array([])
 
         decoded = sess.run(autoencoder['decoded'], feed_dict={x: np.array(batch)})
         #decoded = sess.run(autoencoder['decoded'], feed_dict={x: np.array(np.random.normal(0,1,[len(batch), 8192]))})
+        print(decoded)
         #filtered = np.append(filtered, batch)
-        filtered = np.append(filtered,decoded.reshape([-1]))
         #res = np.transpose(batch_copy, [0,1,2]).reshape([-1])
         #sanity({"transformed":res, "rate": wavobj["rate"], "raw": wavobj['raw']})
         #print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
