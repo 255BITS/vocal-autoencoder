@@ -11,118 +11,27 @@ import glob
 from wav import loadfft2, savefft2, sanity
 
 TRAIN_REPEAT=1
-SIZE=int(1024*1291/256)
+SIZE=32
 DEPTH=1
 LEARNING_RATE = 1e-1
 #BATCH_SIZE=349
 layers = [
     {
-        'type':'conv1d',
+        'type': 'conv1d',
         'filter':[2, 1, DEPTH*2],
         'stride':[1,2,2,1],
         'padding':"SAME"
     },
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 2, DEPTH*4],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 16, DEPTH*32],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 32, DEPTH*64],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 64, DEPTH*128],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 128, DEPTH*256],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 256, DEPTH*512],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-
-
-
-
-        #####
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 1, DEPTH*2],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 2, DEPTH*4],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 4, DEPTH*8],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 8, DEPTH*16],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 16, DEPTH*16],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 32, DEPTH*32],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-
-
-
-
-    #{
-    #    'type': 'conv1d_transpose',
-    #    'output_shape':[-1, 128, 1],
-    #    'filter':[2, 2, DEPTH*2],
-    #    'stride':[1,1,1,1],
-    #    'padding':"SAME"
-    #},
-
     {
-        'type': 'feed_forward_nn',
+        'type': 'autoencoder',
     },
+
 
 ]
 
-def feed_forward_nn(input, layer_def):
-    print("-- Begin feed forward nn")
+def feed_forward_nn(input, layer_def, nextMethod):
     input_dim = int(input.get_shape()[1])
+    print("-- Begin feed forward nn", input_dim, input.get_shape())
     # Initialize W using random values in interval [-1/sqrt(n) , 1/sqrt(n)]
     W = tf.Variable(tf.random_uniform([input_dim, input_dim], -1.0 / math.sqrt(input_dim), 1.0 / math.sqrt(input_dim)))
 
@@ -132,9 +41,9 @@ def feed_forward_nn(input, layer_def):
     output = tf.nn.tanh(tf.matmul(tf.reshape(input, [-1,input_dim]),W) + b)
 
  
-    return output
+    return nextMethod(output)
 
-def conv1d(input, layer_def):
+def conv1d(input, layer_def, nextMethod):
     print('---')
     filters = layer_def['filter']
     filter_normal = tf.Variable(tf.random_normal([2, filters[0], filters[1], filters[2]]))
@@ -152,7 +61,8 @@ def conv1d(input, layer_def):
     print('add layer', add_layer.get_shape())
     print('expand input', expand_input.get_shape())
     print('expand filter', expand_filter.get_shape())
-    expand_input_add = tf.concat(1, (expand_input, add_layer))
+    #expand_input_add = tf.concat(1, (expand_input, add_layer))
+    expand_input_add = add_layer
 
     print('expand input add', expand_input_add.get_shape())
     #print('expand filter', expand_filter.get_shape())
@@ -169,7 +79,7 @@ def conv1d(input, layer_def):
     relu = tf.nn.relu(squeeze + biases)
     hidden = tf.maximum(0.2*relu, relu)
 
-    return hidden
+    return nextMethod(hidden)
 
 def conv1d_transpose(input, layer_def):
     print("--- Begin conv1d_transpose")
@@ -221,21 +131,47 @@ def conv1d_transpose(input, layer_def):
     hidden = tf.nn.relu(conv_transposed + biases)
     return hidden
 
-ops = {
-    'conv1d':conv1d,
-    'conv1d_transpose':conv1d_transpose,
-    'feed_forward_nn':feed_forward_nn
-}
-
 def max_pool(img, k):
     return tf.nn.max_pool(img, ksize=[1, k, k, 1], strides=[1, k, k, 1], padding='VALID')
 
+
+def autoencoder(input, layer_def, nextMethod):
+    input_dim = int(input.get_shape()[1])
+    print("-- Begin autoencoder", input_dim, input.get_shape())
+    W = tf.Variable(tf.random_uniform([input_dim, input_dim], -1.0 / math.sqrt(input_dim), 1.0 / math.sqrt(input_dim)))
+    # Initialize b to zero
+    b = tf.Variable(tf.zeros([input_dim]))
+    output = tf.nn.tanh(tf.matmul(tf.reshape(input, [-1,input_dim]),W) + b)
+
+    print("autoencoder", output.get_shape())
+    inner_layer = nextMethod(output)
+
+    W2 = tf.transpose(W)
+    b2 = tf.Variable(tf.zeros([input_dim]))
+    return tf.nn.tanh(tf.matmul(inner_layer,W2) + b2)
+
+
+
+layer_index=0
 def create(x):
-    prev_layer = x
+    ops = {
+        'conv1d':conv1d,
+        'conv1d_transpose':conv1d_transpose,
+        'feed_forward_nn':feed_forward_nn,
+        'autoencoder':autoencoder
+    }
+
+
     results = {}
-    for i, layer in enumerate(layers):
-        prev_layer = ops[layer['type']](prev_layer, layer)
-    decoded = prev_layer
+    def nextMethod(current_layer):
+        global layer_index
+        if(len(layers) == layer_index+1):
+            return current_layer
+        layer_index += 1
+        layer_def = layers[layer_index]
+        return ops[layer_def['type']](current_layer, layer_def, nextMethod)
+
+    decoded = ops[layers[0]['type']](x, layers[0], nextMethod)
     #print("Reshaping ", decoded.get_shape(), " to ", [BATCH_SIZE, SIZE, DEPTH]) 
     #reconstructed_x = tf.reshape(decoded, [BATCH_SIZE, SIZE,DEPTH])
     reconstructed_x = tf.reshape(decoded, [-1, SIZE,DEPTH])

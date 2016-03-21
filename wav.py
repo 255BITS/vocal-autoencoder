@@ -2,7 +2,6 @@ from scipy.io.wavfile import read, write
 from scipy.fftpack import rfft, irfft
 from numpy.fft import hfft, ihfft, fft, ifft
 import numpy as np
-from sympy.ntheory import factorint
 import math
 
 
