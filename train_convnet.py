@@ -13,8 +13,9 @@ from wav import loadfft2, savefft2, sanity
 TRAIN_REPEAT=1
 SIZE=32
 DEPTH=1
-DIMS=[[4096,4096,1], [256,256,8], [64,64,16]]
+#DIMS=[[4096,4096,1],[None,None,2],[None,None,4]]#, [256,256,8], [64,64,16]]
 #DIMS=[[1024,1024,1], [512,512,2], [256,256,4]]
+DIMS=[[1024,1024,1], [512,512,2], [256,256,4]]
 #DIMS=[[256,256,1],[128, 128, 2],[64, 64, 4]]
 #DIMS=[[128,128,1],[64, 64, 2], [32,32,4]]
 FILTER_SIZE=[]
@@ -35,12 +36,14 @@ def create(x):
         height = dim[0]
         fw = fh = 2
         sv = sd = 2
-        filterr = tf.random_normal([fw, fh, prev_depth, dim[2]])
+        filterr = tf.Variable(tf.random_normal([fw, fh, prev_depth, depth]))
+        print(filterr)
         #print(tf.shape(filterr))
         #print(tf.shape(prev_layer))
         conv = tf.nn.conv2d(prev_layer, filterr, [1, sv, sd, 1], padding='VALID')
         biases = tf.Variable(tf.zeros([depth]))
-        conv = max_pool(conv, 1)
+        #conv = max_pool(conv, 1)
+        #conv = tf.nn.dropout(conv, 0.75)
         hidden = tf.nn.relu(conv + biases)
         prev_layer=hidden
         prev_depth = depth
@@ -50,19 +53,20 @@ def create(x):
     filterr = tf.truncated_normal([8, 8, DEPTH, DEPTH], stddev=0.1)
 
     deconv_shape = tf.pack([tf.shape(prev_layer)[0], SIZE, SIZE, DEPTH])
-    print('prev_depth', prev_depth)
-    print('prev_layer', tf.shape(prev_layer))
-    arranged_prev_layer = tf.depth_to_space(prev_layer, 4)
-    print('shape',tf.shape(arranged_prev_layer)[0])
+    #print('prev_depth', prev_depth)
+    #print('prev_layer', tf.shape(prev_layer))
+    arranged_prev_layer = tf.depth_to_space(prev_layer, 2)
+    #print('shape',tf.shape(arranged_prev_layer)[0])
     conv_transposed = tf.nn.conv2d_transpose(arranged_prev_layer, 
             filterr,
             output_shape=deconv_shape,
-            strides=[1,2,2,1],
+            strides=[1,4,4,1],
             padding='SAME'
             )
+    prev_layer =conv_transposed
     W = tf.Variable(tf.random_normal([SIZE, SIZE]))
     b = tf.Variable(tf.zeros([SIZE]))
-    reshaped = tf.reshape(conv_transposed, [-1, W.get_shape().as_list()[0]])
+    reshaped = tf.reshape(prev_layer, [-1, W.get_shape().as_list()[0]])
     mat = tf.matmul(reshaped,W)
     output = tf.nn.tanh(mat + b)
 
@@ -70,8 +74,8 @@ def create(x):
     reconstructed_x = tf.reshape(decoded, [-1, SIZE,SIZE,DEPTH])
     results["decoded"]=reconstructed_x
     results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(x-reconstructed_x)))
-    results['arranged']= arranged_prev_layer
-    results['transposed']= conv_transposed
+    #results['arranged']= arranged_prev_layer
+    #results['transposed']= conv_transposed
     return results
 
 def get_input():
@@ -82,13 +86,13 @@ def deep_test():
         x = get_input()
         autoencoder = create(x)
         #train_step = tf.train.GradientDescentOptimizer(3.0).minimize(autoencoder['cost'])
-        train_step = tf.train.AdamOptimizer(1e-2).minimize(autoencoder['cost'])
+        train_step = tf.train.AdamOptimizer(1e-5).minimize(autoencoder['cost'])
         init = tf.initialize_all_variables()
         sess.run(init)
         saver = tf.train.Saver()
-        saver.save(sess, 'model.ckpt')
+        saver.save(sess, 'modelconv.ckpt')
 
-        tf.train.write_graph(sess.graph_def, 'log', 'model.pbtxt', False)
+        tf.train.write_graph(sess.graph_def, 'log', 'modelcon.pbtxt', False)
 
         #output = irfft(filtered)
         i=0
@@ -101,7 +105,7 @@ def deep_test():
 
 # given fft, return back a stack 3-dimensional SIZExSIZE squares
 def collect_input(data, dims):
-    slice_size = dims[0]*dims[1]*100#dims[2]
+    slice_size = dims[0]*dims[1]*dims[2]
     length = len(data)
     # discard extra info
     relevant = int(length/slice_size)*slice_size
@@ -124,7 +128,7 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
         print("Finished " + filename)
         #print(i, " original", batch[0])
         #print( " decoded", sess.run(autoencoder['conv2'], feed_dict={x: input_squares}))
-        saver.save(sess, 'model.ckpt')
+        saver.save(sess, 'modelconv.ckpt')
 
 def deep_gen():
         sess = tf.Session()
@@ -137,7 +141,7 @@ def deep_gen():
         init = tf.initialize_all_variables()
         sess.run(init)
         saver = tf.train.Saver()
-        saver.restore(sess, 'model.ckpt')
+        saver.restore(sess, 'modelconv.ckpt')
 
 
 

@@ -2,16 +2,22 @@ from scipy.io.wavfile import read, write
 from scipy.fftpack import rfft, irfft
 from numpy.fft import hfft, ihfft, fft, ifft
 import numpy as np
+from sympy.ntheory import factorint
+import math
 
+
+def best_length_fft(n):
+    return int(int(n/2)*2)
+    #return math.pow(2, max(factorint(n)))
 def loadfft(wavfile):
     print("reading file")
     rate, input = read(wavfile)
 
-    print("computing rfft "+str(len(input)))
-    rfftx = rfft(input, int(int(len(input)/2)*2))
-    print("conputing transformed_raw")
+    max_size = best_length_fft(len(input))
+    print("computing rfft ",max_size)
+    rfftx = rfft(input, max_size)
     transformed_raw = np.array(rfftx, dtype=np.float32)
-    print("conputing transformed")
+    print("conputing transformed_raw", len(transformed_raw))
     transformed = transformed_raw / transformed_raw.max(axis=0)
     print("conputing done")
     print(rate)
