@@ -42,18 +42,17 @@ layers = [
     #    'padding':"SAME"
     #},
 
->>>>>>> [fix] actually emitting sound now
-    #{
-    #    'type': 'autoencoder',
-    #    'output_dim': 32
-    #},
+    {
+        'type': 'autoencoder',
+        'output_dim': 32
+    },
     #{
     #    'type': 'autoencoder',
     #    'output_dim': 24
     #},
-    {
-        'type': 'feed_forward_nn',
-    },
+    #{
+    #    'type': 'feed_forward_nn',
+    #},
     #{
     #    'type': 'conv1d',
     #    'filter':[2, 1, DEPTH*2],
@@ -237,8 +236,8 @@ def deep_test():
         #train_step = None
         init = tf.initialize_all_variables()
         sess.run(init)
-        saver = tf.train.Saver()
-        saver.save(sess, 'model1d.ckpt')
+        saver = tf.train.Saver(tf.all_variables())
+        saver.save(sess, SAVE_DIR+'/model1d.ckpt', global_step=0)
 
         tf.train.write_graph(sess.graph_def, 'log', 'modelcon.pbtxt', False)
 
@@ -249,7 +248,9 @@ def deep_test():
             for file in glob.glob('training/*.wav'):
                 i+=1
                 learn(file, sess, train_step, x,i, autoencoder, saver)
-        saver.save(sess, 'model1.ckpt')
+                if(i%100==1):
+                    print("Saving")
+                    saver.save(sess, SAVE_DIR+"/model1.ckpt", global_step=i+1)
         
 
 def collect_input(data, dims):
@@ -278,7 +279,7 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
         #print( " decoded", sess.run(autoencoder['conv2'], feed_dict={x: input_squares}))
 
 def deep_gen():
-        sess = tf.Session()
+    with tf.Session() as sess:
         wavobj = loadfft2('input.wav')
         sanity(wavobj)
         transformed = wavobj['transformed']
@@ -288,7 +289,12 @@ def deep_gen():
         init = tf.initialize_all_variables()
         sess.run(init)
         saver = tf.train.Saver()
-        saver.restore(sess, 'model1d.ckpt')
+        checkpoint = tf.train.get_checkpoint_state(SAVE_DIR)
+        if(checkpoint and checkpoint.model_checkpoint_path):
+            saver.restore(sess, checkpoint.model_checkpoint_path)
+        else:
+            print("ERROR: No checkpoint found")
+            exit(-1)
 
 
 
@@ -305,7 +311,7 @@ def deep_gen():
         #print(i, " cost", sess.run(autoencoder['cost'], feed_dict={x: batch}))
         #print(i, " original", batch[0])
         #print( i, " decoded", sess.run(autoencoder['decoded'], feed_dict={x: batch}))
-        savefft2('output2.wav', wavobj, filtered)
+        savefft2('output2.wav', wavobj, decoded)
                        
 if __name__ == '__main__':
     if(sys.argv[1] == 'train'):
