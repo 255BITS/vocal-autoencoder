@@ -12,57 +12,44 @@ from wav import loadfft2, savefft2, sanity
 
 
 TRAIN_REPEAT=1
-SIZE=64
+SIZE=128
 DEPTH=1
-LEARNING_RATE = 7e-5
+LEARNING_RATE = tf.Variable(5e-3, trainable=False)
+
+SAVE_DIR='save'
 #BATCH_SIZE=349
 layers = [
     {
         'type':'conv1d',
-        'filter':[2, 1, DEPTH*2],
+        'filter':[32, 1, DEPTH*2],
         'stride':[1,2,2,1],
         'padding':"SAME"
-    },
-    {
-        'type':'conv1d',
-        'filter':[2, 2, DEPTH*4],
-        'stride':[1,2,2,1],
-        'padding':"SAME"
-    },
-    {
-        'type':'conv1d',
-        'filter':[2, 4, DEPTH*8],
-        'stride':[1,2,2,1],
-        'padding':"SAME"
-    },
-    #{
-    #    'type':'conv1d',
-    #    'filter':[2, 32, DEPTH*64],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
-
-    {
-        'type': 'autoencoder',
-        'output_dim': 32
-    },
-    #{
-    #    'type': 'autoencoder',
-    #    'output_dim': 24
-    #},
-    #{
-    #    'type': 'feed_forward_nn',
-    #},
-    #{
-    #    'type': 'conv1d',
-    #    'filter':[2, 1, DEPTH*2],
-    #    'stride':[1,2,2,1],
-    #    'padding':"SAME"
-    #},
+        },
 
 
+    { 'type': 'reshape',
+      'output_dims': [-1, SIZE, DEPTH]
+      },
+    {
+        'type': 'feed_forward_nn',
+        },
+    {
+        'type': 'feed_forward_nn',
+        },
+
+    {
+        'type': 'feed_forward_nn',
+        },
+
+    {
+        'type': 'feed_forward_nn',
+        },
 
 ]
+
+def reshape(input, layer_def, nextMethod):
+    reshape = tf.reshape(input, layer_def['output_dims'])
+    return nextMethod(reshape)
 
 def feed_forward_nn(input, layer_def, nextMethod):
     input_dim = int(input.get_shape()[1])
@@ -75,7 +62,7 @@ def feed_forward_nn(input, layer_def, nextMethod):
 
     output = tf.nn.tanh(tf.matmul(tf.reshape(input, [-1,input_dim]),W) + b)
 
- 
+
     return nextMethod(output)
 
 def conv1d(input, layer_def, nextMethod):
@@ -86,10 +73,10 @@ def conv1d(input, layer_def, nextMethod):
     stride =layer_def['stride']
     print('in shape', input.get_shape())
 
-    input_t = tf.transpose(tf.reshape(input, [-1, int(input.get_shape()[1]), 1]), [0,1,2])
-    print('in_t shape', input_t.get_shape())
+    #input_t = tf.transpose(tf.reshape(input, [-1, int(input.get_shape()[1]), 1]), [0,1,2])
+    #print('in_t shape', input_t.get_shape())
     #filter_t = tf.transpose(filter_normal, [1,0,2])
-    expand_input = tf.expand_dims(input_t, 1)
+    expand_input = tf.expand_dims(input, 1)
     expand_filter = filter_normal
     #expand_filter = tf.expand_dims(filter_t, 0)
     #add_layer=tf.tile(expand_input, [1,2,1,1])
@@ -98,16 +85,16 @@ def conv1d(input, layer_def, nextMethod):
     print('add layer', add_layer.get_shape())
     print('expand input', expand_input.get_shape())
     print('expand filter', expand_filter.get_shape())
-    #expand_input_add = tf.concat(1, (expand_input, add_layer))
-    expand_input_add = add_layer
+    expand_input_add = tf.concat(1, (expand_input, add_layer))
+    #expand_input_add = add_layer
 
     print('expand input add', expand_input_add.get_shape())
     #print('expand filter', expand_filter.get_shape())
     print("stride", stride)
     conv = tf.nn.conv2d(expand_input_add, expand_filter, stride, padding=padding)
     print("conv:", conv.get_shape())
-    #conv = max_pool(conv, 2)
-    #conv = tf.nn.dropout(conv, 0.75)
+    #conv = max_pool(conv, 1)
+    conv = tf.nn.dropout(conv, 0.9)
     #slice= tf.slice(conv, [0,0,0,0], [-1, 1, -1, -1])
     #squeeze = tf.squeeze(slice, squeeze_dims=[1])
     squeeze = tf.squeeze(conv, squeeze_dims=[1])
@@ -116,6 +103,7 @@ def conv1d(input, layer_def, nextMethod):
     biases = tf.Variable(tf.zeros([squeeze.get_shape()[-1]]))
     relu = tf.nn.relu(squeeze + biases)
     hidden = tf.maximum(0.2*relu, relu)
+    #hidden = squeeze
 
     return nextMethod(hidden)
 
@@ -177,7 +165,7 @@ def autoencoder(input, layer_def, nextMethod):
     input_dim = int(input.get_shape()[1])
     output_dim = layer_def['output_dim']
     print("-- Begin autoencoder", input_dim, input.get_shape())
-    W = tf.Variable(tf.random_uniform([input_dim, output_dim], -1.0 / math.sqrt(input_dim), 1.0 / math.sqrt(input_dim)))
+    W = tf.Variable(tf.random_normal([input_dim, output_dim]))
     # Initialize b to zero
     b = tf.Variable(tf.zeros([output_dim]))
     output = tf.nn.tanh(tf.matmul(tf.reshape(input, [-1,input_dim]),W) + b)
@@ -199,7 +187,8 @@ def create(x):
         'conv1d':conv1d,
         'conv1d_transpose':conv1d_transpose,
         'feed_forward_nn':feed_forward_nn,
-        'autoencoder':autoencoder
+        'autoencoder':autoencoder,
+        'reshape':reshape
     }
 
 
@@ -219,7 +208,7 @@ def create(x):
     print("Completed reshaping")
     #results["decoded"]=reconstructed_x
     results['decoded']=tf.reshape(decoded, [-1])
-    results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(x-reconstructed_x)))
+    results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(reconstructed_x-x)))
     #results['arranged']= arranged_prev_layer
     #results['transposed']= conv_transposed
     return results
@@ -249,6 +238,7 @@ def deep_test():
                 i+=1
                 learn(file, sess, train_step, x,i, autoencoder, saver)
                 if(i%100==1):
+                    i=i
                     print("Saving")
                     saver.save(sess, SAVE_DIR+"/model1.ckpt", global_step=i+1)
         
@@ -269,7 +259,6 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
         rate = wavobj['rate']
 
         input_squares = collect_input(transformed, [SIZE, DEPTH])
-        print("wav size", len(input_squares))
         #print(input_squares)
         #print("Running " + filename + str(np.shape(input_squares)[0]))
         sess.run(train_step, feed_dict={x: input_squares})
