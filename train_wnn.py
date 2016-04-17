@@ -41,7 +41,7 @@ def wnn_decode(output, output_dim):
 
 def wnn_encode(input, wavelets):
     # this is the depth of the tree
-    full_resolutions = math.log(wavelets)/math.log(2)
+    #full_resolutions = math.log(wavelets)/math.log(2)
     dim_in = input.get_shape()[1]
     def gaus(input, translation, dilation):
         input = (input - translation)/dilation
