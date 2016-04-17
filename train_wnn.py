@@ -26,7 +26,7 @@ SAVE_DIR='save'
 layers = [
     {
         'type': 'autoencoder',
-        'wavelets': SIZE//2
+        'wavelets': SIZE//8
     },
 
 ]
@@ -44,7 +44,7 @@ def wnn_encode(input, wavelets):
     #full_resolutions = math.log(wavelets)/math.log(2)
     dim_in = input.get_shape()[1]
     def gaus(input, translation, dilation):
-        input = (input - translation)/dilation
+        #input = (input - translation)/dilation
         #return (-input)*(-tf.exp(tf.square(input)))
         #mexican hat
         square = tf.square(input)
@@ -93,14 +93,14 @@ def create(x):
 
     flat_x = tf.reshape(x, [BATCH_SIZE, -1])
     decoded = ops[layers[0]['type']](flat_x, layers[0], nextMethod)
-    reconstructed_x = tf.reshape(decoded, [BATCH_SIZE, SIZE,2])
-    results['decoded']=tf.reshape(decoded, [BATCH_SIZE, SIZE,2])
+    reconstructed_x = tf.reshape(decoded, [BATCH_SIZE, 2,SIZE])
+    results['decoded']=tf.reshape(decoded, [BATCH_SIZE, 2,SIZE])
     results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(reconstructed_x-x)))
 
     return results
 
 def get_input():
-    return tf.placeholder("float", [BATCH_SIZE, SIZE,2], name='x')
+    return tf.placeholder("float", [BATCH_SIZE, 2, SIZE], name='x')
 def deep_test():
         sess = tf.Session()
 
@@ -151,9 +151,10 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
         #print("Running " + filename + str(np.shape(input_squares)[0]))
         for square in input_squares:
             square = np.reshape(square, [BATCH_SIZE, SIZE,2])
+            square = np.swapaxes(square, 1, 2)
             _, cost = sess.run([train_step,autoencoder['cost']], feed_dict={x: square})
 
-            print(" cost", cost,k,filename )
+            print(" cost", cost,k, filename )
         #print("Finished " + filename)
         #print(i, " original", batch[0])
         #print( " decoded", sess.run(autoencoder['conv2'], feed_dict={x: input_squares}))
@@ -182,8 +183,9 @@ def deep_gen():
         all_out=[]
         for batch in batches:
             batch = np.reshape(batch, [BATCH_SIZE, SIZE, 2])
+            batch =np.swapaxes(batch, 1, 2)
             decoded = sess.run(autoencoder['decoded'], feed_dict={x: np.array(batch)})
-            all_out.append(decoded)
+            all_out.append(np.swapaxes(decoded, 1, 2))
         wavobj['data']=np.reshape(all_out, [-1, SIZE, 2])
         print('saving to output2.wav', decoded)
         save_wav(wavobj, 'output2.wav')
