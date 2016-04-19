@@ -4,6 +4,7 @@ from numpy.fft import hfft, ihfft, fft, ifft
 import numpy as np
 import math
 import wave
+import soundfile as sf
 
 
 def best_length_fft(n):
@@ -43,7 +44,8 @@ def get_wav(path):
     results['framerate']=wav.getframerate()
     results['nframes']=wav.getnframes()
     results['compname']=wav.getcompname()
-    processed = np.array(data).astype(np.int16, copy=False)
+    #processed = np.array(data).astype(np.int16, copy=False)
+    processed = sf.read(path)[0]
     results['data']=processed
     return results
 
@@ -60,7 +62,8 @@ def save_wav(in_wav, path):
 
     wav.setcomptype('NONE', 'processed')
 
-    processed = np.array(in_wav['data'], dtype=np.int16)
-    wav.writeframes(processed)
+    #processed = np.array(in_wav['data'], dtype=np.int16)
+    #wav.writeframes(processed)
+    sf.write(path, in_wav['data'], in_wav['rate'])
 
 
