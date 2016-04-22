@@ -24,7 +24,7 @@ TRAIN_REPEAT=100000
 SIZE=8192//8
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
 BATCH_SIZE=1024
-WAVELETS=SIZE*2
+WAVELETS=SIZE
 CHANNELS = 1
 
 SAVE_DIR='save'
@@ -57,7 +57,7 @@ def feed_forward_nn(input, layer_def, nextMethod):
 def wnn_decode(output, output_dim):
     wavelets = output.get_shape()[1]
     with tf.variable_scope('wnn_decode'):
-        summer = tf.get_variable('summer', [1, output_dim], initializer= tf.random_uniform_initializer())
+        summer = tf.get_variable('summer', [BATCH_SIZE, output_dim], initializer= tf.constant_initializer(0))
         w = tf.get_variable('w', [wavelets, output_dim])
         output = tf.matmul(output, w) + summer
         return output
@@ -90,7 +90,7 @@ def wnn_encode(input, wavelets):
         full_resolutions = math.log(wavelets*2)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
         print(tree)
-        d_c = [leaf[1] for leaf in tree]
+        d_c = [(60*leaf[1]) for leaf in tree]
         d_c.append(0.01)
         t_c = [leaf[0] for leaf in tree]
         t_c.append(0.01)
@@ -102,7 +102,7 @@ def wnn_encode(input, wavelets):
         translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         w = tf.get_variable('w', [dim_in,wavelets])
-        input_proj = (tf.matmul(input, w) - translation)/dilation
+        input_proj = tf.div(tf.sub(tf.matmul(input, w), translation),dilation)
         return mother(input_proj)
 
 
