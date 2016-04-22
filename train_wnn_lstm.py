@@ -21,11 +21,13 @@ import matplotlib.pyplot as plt
 
 PREDICT_ROLL=8
 TRAIN_REPEAT=100000
-SIZE=8192//8
+SIZE=8192//16
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
-BATCH_SIZE=1024
-WAVELETS=SIZE*2
-CHANNELS = 1
+BATCH_SIZE=2048
+WAVELETS=SIZE//2
+CHANNELS=1
+
+NUM_MIXTURES=24
 
 SAVE_DIR='save'
 #BATCH_SIZE=349
@@ -81,31 +83,23 @@ def wnn_encode(input, wavelets):
     def mother(input):
         #return (-input)*(-tf.exp(tf.square(input)))
         #mexican hat
-        #square = tf.square(input)
-        #return (1-square)*tf.exp(-square/2)
+        square = tf.square(input)
+        return (1-square)*tf.exp(-square/2)
 
         #mortlet
-        return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
+        #return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
     with tf.variable_scope('wnn_encode'):
-        full_resolutions = math.log(wavelets*2)/math.log(2)
+        full_resolutions = math.log(wavelets)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
         print(tree)
         d_c = [leaf[1] for leaf in tree]
-        d_c.append(0.01)
         t_c = [leaf[0] for leaf in tree]
-        t_c.append(0.01)
-        print('yer vals', len(d_c), len(t_c))
-        t_c = np.tile(t_c,BATCH_SIZE)
-        d_c = np.tile(d_c,BATCH_SIZE)
-        #translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [128,256])
-        #dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [128,256])
-        translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
-        dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
+        print('yer vals', np.shape(d_c), np.shape(t_c))
+        translation = tf.get_variable('translation', [1, wavelets], initializer = tf.constant_initializer(t_c))
+        dilation = tf.get_variable('dilation', [1, wavelets], initializer = tf.constant_initializer(d_c))
         w = tf.get_variable('w', [dim_in,wavelets])
         input_proj = (tf.matmul(input, w) - translation)/dilation
         return mother(input_proj)
-
-
 def autoencoder(input, layer_def, nextMethod):
     input_dim = int(input.get_shape()[1])
     output_dim = input_dim
@@ -145,14 +139,59 @@ def create(x):
 
     flat_x = tf.reshape(x, [BATCH_SIZE, -1])
     decoded = ops[layers[0]['type']](flat_x, layers[0], nextMethod)
+
+
+    # below is where we need to do MDN splitting of distribution params
+    def get_mixture_coef(output):
+      # returns the tf slices containing mdn dist params
+      # ie, eq 18 -> 23 of http://arxiv.org/abs/1308.0850
+      z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr = tf.split(1, 6, z)
+
+      # process output z's into MDN paramters
+
+      # softmax all the pi's:
+      max_pi = tf.reduce_max(z_pi, 1, keep_dims=True)
+      z_pi = tf.sub(z_pi, max_pi)
+      z_pi = tf.exp(z_pi)
+      normalize_pi = tf.inv(tf.reduce_sum(z_pi, 1, keep_dims=True))
+      z_pi = tf.mul(normalize_pi, z_pi)
+
+      # exponentiate the sigmas and also make corr between -1 and 1.
+      z_sigma1 = tf.exp(z_sigma1)
+      z_sigma2 = tf.exp(z_sigma2)
+      z_corr = tf.tanh(z_corr)
+      return [z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen]
+
+
+    def tf_2d_normal(x1, x2, mu1, mu2, s1, s2, rho):
+      # eq # 24 and 25 of http://arxiv.org/abs/1308.0850
+      norm1 = tf.sub(x1, mu1)
+      norm2 = tf.sub(x2, mu2)
+      s1s2 = tf.mul(s1, s2)
+      z = tf.square(tf.div(norm1, s1))+tf.square(tf.div(norm2, s2))-2*tf.div(tf.mul(rho, tf.mul(norm1, norm2)), s1s2)
+      negRho = 1-tf.square(rho)
+      result = tf.exp(tf.div(-z,2*negRho))
+      denom = 2*np.pi*tf.mul(s1s2, tf.sqrt(negRho))
+      result = tf.div(result, denom)
+      return result
+
+    def get_lossfunc(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen, x1_data, x2_data, pen_data):
+      result0 = tf_2d_normal(x1_data, x2_data, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr)
+      # implementing eq # 26 of http://arxiv.org/abs/1308.0850
+      epsilon = 1e-20
+      result1 = tf.mul(result0, z_pi)
+      result1 = tf.reduce_sum(result1, 1, keep_dims=True)
+      result1 = -tf.log(tf.maximum(result1, 1e-20)) # at the beginning, some errors are exactly zero.
+      result_shape = tf.reduce_mean(result1)
+
     reconstructed_x = tf.reshape(decoded, [BATCH_SIZE, CHANNELS,SIZE])
     results['decoded']=tf.reshape(decoded, [BATCH_SIZE, CHANNELS,SIZE])
     results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(reconstructed_x-x)))
 
     with tf.variable_scope('wnn_encode'):
         tf.get_variable_scope().reuse_variables()
-        translation = tf.get_variable('translation', [BATCH_SIZE, WAVELETS])
-        dilation = tf.get_variable('dilation', [BATCH_SIZE, WAVELETS])
+        translation = tf.get_variable('translation', [1, WAVELETS])
+        dilation = tf.get_variable('dilation', [1, WAVELETS])
         results['translation' ] = translation
         results['dilation'] = dilation
         return results
@@ -164,15 +203,20 @@ def deep_test():
 
         x = get_input()
         autoencoder = create(x)
+        grad_clip = 5
         #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
         train_step = tf.train.AdamOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.d_loss, self.d_vars),
+                                grad_clip)
+        train_step = train_step.apply_gradients(zip(grads, tf.trainable_variables()))
         #train_step = None
         init = tf.initialize_all_variables()
         sess.run(init)
         saver = tf.train.Saver(tf.all_variables())
-        saver.save(sess, SAVE_DIR+'/modellstm3.ckpt', global_step=0)
+        saver.save(sess, SAVE_DIR+'/modellstm.ckpt', global_step=0)
 
-        tf.train.write_graph(sess.graph_def, 'log', 'modellstm3.pbtxt', False)
+        tf.train.write_graph(sess.graph_def, 'log', 'modellstm.pbtxt', False)
+        
 
         #output = irfft(filtered)
         i=0
@@ -182,10 +226,10 @@ def deep_test():
             for file in glob.glob('training/*.wav'):
                 i+=1
                 learn(file, sess, train_step, x,i, autoencoder, saver)
-                if(i%100==1):
+                if(i%1000==1):
                     i=i
                     print("Saving")
-                    saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
+                    saver.save(sess, SAVE_DIR+"/modellstm.ckpt", global_step=i+1)
         
 
 def collect_input(data, dims):
@@ -216,15 +260,13 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
             plt.plot(to_plot)
 
             plt.xlim([0, SIZE])
-            plt.ylim([-2, 2])
             plt.ylabel("Amplitude")
             plt.xlabel("Time")
             ## set the title  
             plt.title("batch")
             #plt.show()
-            _, cost, translation, dilation, decoded = sess.run([train_step,autoencoder['cost'], autoencoder['translation'], autoencoder['dilation'], autoencoder['decoded']], feed_dict={x: square})
-            plt.plot(np.reshape(decoded[0,0,:], [-1]))
             plt.savefig('visualize/input-'+str(k)+'.png')
+            _, cost, translation, dilation = sess.run([train_step,autoencoder['cost'], autoencoder['translation'], autoencoder['dilation']], feed_dict={x: square})
 
             print(" cost", cost,np.mean(translation), np.mean(dilation), k, filename )
         #print("Finished " + filename)
@@ -255,10 +297,11 @@ def deep_gen():
 
         all_out=[]
         for batch in batches:
+            print(np.shape(batch), BATCH_SIZE, SIZE, CHANNELS)
             batch = np.reshape(batch, [BATCH_SIZE, SIZE, CHANNELS])
             batch =np.swapaxes(batch, 1, 2)
             decoded = sess.run(autoencoder['decoded'], feed_dict={x: np.array(batch)})
-            all_out.append(np.swapaxes(decoded, 1, 2))
+            all_out.append(np.swapaxes(decoded, 1, CHANNELS))
         all_out = np.array(all_out)
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
         print('saving to output2.wav', np.min(all_out), np.max(all_out))
