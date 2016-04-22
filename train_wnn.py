@@ -24,7 +24,7 @@ TRAIN_REPEAT=100000
 SIZE=8192//8
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
 BATCH_SIZE=1024
-WAVELETS=SIZE
+WAVELETS=SIZE//8
 CHANNELS = 1
 
 SAVE_DIR='save'
@@ -90,19 +90,21 @@ def wnn_encode(input, wavelets):
         full_resolutions = math.log(wavelets*2)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
         print(tree)
-        d_c = [(60*leaf[1]) for leaf in tree]
+        d_c = [(leaf[1]) for leaf in tree]
         d_c.append(0.01)
         t_c = [leaf[0] for leaf in tree]
         t_c.append(0.01)
         print('yer vals', len(d_c), len(t_c))
-        t_c = np.tile(t_c,BATCH_SIZE)
-        d_c = np.tile(d_c,BATCH_SIZE)
+        #t_c = np.tile(t_c,BATCH_SIZE)
+        #d_c = np.tile(d_c,BATCH_SIZE)
         #translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [128,256])
         #dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [128,256])
         translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
-        w = tf.get_variable('w', [dim_in,wavelets])
-        input_proj = tf.div(tf.sub(tf.matmul(input, w), translation),dilation)
+        #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(1))
+        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer())
+        #w = tf.ones([dim_in, wavelets])
+        input_proj = tf.mul(tf.sub(tf.matmul(input, w), translation),dilation)
         return mother(input_proj)
 
 
