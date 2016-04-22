@@ -57,9 +57,9 @@ def feed_forward_nn(input, layer_def, nextMethod):
 def wnn_decode(output, output_dim):
     wavelets = output.get_shape()[1]
     with tf.variable_scope('wnn_decode'):
-        summer = tf.get_variable('summer', [BATCH_SIZE, output_dim], initializer= tf.constant_initializer(0))
-        w = tf.get_variable('w', [wavelets, output_dim])
-        output = tf.matmul(output, w) + summer
+        summer = tf.get_variable('summer', [output_dim], initializer= tf.constant_initializer(0))
+        w = tf.get_variable('w', [wavelets, output_dim], initializer=tf.random_normal_initializer(stddev=0.001, mean=0))
+        output = tf.nn.xw_plus_b(output, w, summer)
         return output
 
 def wnn_encode(input, wavelets):
