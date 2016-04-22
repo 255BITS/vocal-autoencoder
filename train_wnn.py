@@ -129,8 +129,7 @@ def autoencoder(input, layer_def, nextMethod):
 layer_index=0
 def create(x):
     ops = {
-        'autoencoder':autoencoder,
-        'feedforward':feed_forward_nn,
+        'autoencoder':autoencoder
     }
 
 
