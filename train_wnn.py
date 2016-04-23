@@ -24,7 +24,7 @@ TRAIN_REPEAT=100000
 SIZE=8192//8
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
 BATCH_SIZE=1024
-WAVELETS=SIZE//8
+WAVELETS=SIZE//4
 CHANNELS = 1
 
 SAVE_DIR='save'
@@ -40,25 +40,12 @@ layers = [
     #}
 
 ]
-def feed_forward_nn(input, layer_def, nextMethod):
-    input_dim = int(input.get_shape()[1])
-    print("-- Begin feed forward nn", input_dim, input.get_shape())
-    W = tf.Variable(tf.random_normal([input_dim, input_dim]))
-
-    # Initialize b to zero
-    b = tf.Variable(tf.zeros([input_dim]))
-
-    output = tf.nn.tanh(tf.matmul(tf.reshape(input, [-1,input_dim]),W) + b)
-
-
-    return nextMethod(output)
-
 
 def wnn_decode(output, output_dim):
     wavelets = output.get_shape()[1]
     with tf.variable_scope('wnn_decode'):
         summer = tf.get_variable('summer', [output_dim], initializer= tf.constant_initializer(0))
-        w = tf.get_variable('w', [wavelets, output_dim], initializer=tf.random_normal_initializer(stddev=0.001, mean=0))
+        w = tf.get_variable('w', [wavelets, output_dim], initializer=tf.truncated_normal_initializer(stddev=0.01, mean=0))
         output = tf.nn.xw_plus_b(output, w, summer)
         return output
 
@@ -102,7 +89,7 @@ def wnn_encode(input, wavelets):
         translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(1))
-        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer())
+        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
         #w = tf.ones([dim_in, wavelets])
         input_proj = tf.mul(tf.sub(tf.matmul(input, w), translation),dilation)
         return mother(input_proj)
