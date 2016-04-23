@@ -84,13 +84,12 @@ def wnn_encode(input, wavelets, name):
             concat+=tree_right
         return concat
     def mother(input):
-        #return (-input)*(-tf.exp(tf.square(input)))
+        return (-input)*(-tf.exp(tf.square(input)))
         #mexican hat
-        square = tf.square(input)
-        start = tf.get_variable("mothersub", 1, initializer=tf.constant_initializer(1.))
-        div = tf.get_variable("motherdiv", 1, initializer=tf.constant_initializer(2.))
-        scale = tf.get_variable("motherscale", 1, initializer=tf.constant_initializer(1.))
-        return (scale)*((start-square)*tf.exp(-square/div))
+        #square = tf.square(input)
+        #start = tf.get_variable("mothersub", 1, initializer=tf.constant_initializer(1.))
+        #div = tf.get_variable("motherdiv", 1, initializer=tf.constant_initializer(2.))
+        #return (start-square)*tf.exp(-square/div)
 
         #mortlet
         #return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
@@ -103,10 +102,12 @@ def wnn_encode(input, wavelets, name):
         t_c = [leaf[0] for leaf in tree]
         t_c.append(0.01)
         print('yer vals', len(d_c), len(t_c))
-        #t_c = np.tile(t_c,BATCH_SIZE)
-        #d_c = np.tile(d_c,BATCH_SIZE)
-        #translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [128,256])
-        #dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [128,256])
+        t_c = np.tile(t_c,BATCH_SIZE)
+        d_c = np.tile(d_c,BATCH_SIZE)
+        print('-tc',np.shape(t_c))
+        print('-dc',d_c)
+        translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, 128])
+        dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, 128])
         translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
@@ -198,7 +199,6 @@ def collect_input(data, dims):
     i = 0
     while((i+1)*dims[0]*BATCH_SIZE < len(data)):
         splitd = data[i*dims[0]*BATCH_SIZE:((i+1)*dims[0]*BATCH_SIZE)]
-        print("split", np.shape(splitd), "data", np.shape(data))
         result.append(splitd)
         i+= 1
 
