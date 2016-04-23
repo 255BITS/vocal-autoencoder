@@ -21,13 +21,14 @@ import matplotlib.pyplot as plt
 
 PREDICT_ROLL=8
 TRAIN_REPEAT=100000
-SIZE=8192*4
+SIZE=441*4
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
-BATCH_SIZE=256
-WAVELETS=1024*2
+BATCH_SIZE=4096
+WAVELETS=64*4
 CHANNELS = 1
 
-PLOT_EVERY = 100
+PLOT_EVERY = 50
+SAVE_EVERY = 200
 
 SAVE_DIR='save'
 #BATCH_SIZE=349
@@ -63,7 +64,7 @@ def wnn_decode(output, output_dim, name):
     wavelets = output.get_shape()[1]
     with tf.variable_scope('wnn_decode_'+name):
         summer = tf.get_variable('summer', [output_dim], initializer= tf.constant_initializer(0))
-        w = tf.get_variable('w', [wavelets, output_dim], initializer=tf.truncated_normal_initializer(stddev=0.01, mean=0))
+        w = tf.get_variable('w', [wavelets, output_dim], initializer=tf.random_normal_initializer(stddev=0.01, mean=0))
         output = tf.nn.xw_plus_b(output, w, summer)
         return output
 
@@ -92,9 +93,8 @@ def wnn_encode(input, wavelets, name):
         #return (start-square)*tf.exp(-square/div)
 
         #mortlet
-        #return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
-    with tf.variable_scope('wnn_encode_'+name):
         return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
+    with tf.variable_scope('wnn_encode_'+name):
         full_resolutions = math.log(wavelets*2)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
         print(tree)
@@ -190,22 +190,17 @@ def deep_test():
                 i+=1
                 k = learn(file, sess, train_step, x,j, autoencoder, saver)
                 j+= k
-                if(i%200==1):
+                if(i%SAVE_EVERY==1):
                     print("Saving")
                     saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
         
 
 def collect_input(data, dims):
-    result = []
-    i = 0
-    while((i+1)*dims[0]*BATCH_SIZE < len(data)):
-        splitd = data[i*dims[0]*BATCH_SIZE:((i+1)*dims[0]*BATCH_SIZE)]
-        result.append(splitd)
-        i+= 1
-
-
-    result = np.array(result)
-    reshaped =  np.reshape(result, (-1, BATCH_SIZE, dims[0]))
+    length = len(data)
+    # discard extra info
+    arr= np.array(data[0:int(length/dims[0]/BATCH_SIZE)*dims[0]*BATCH_SIZE])
+    
+    reshaped =  arr.reshape((-1, BATCH_SIZE, dims[0]))
     return reshaped
 
 def learn(filename, sess, train_step, x, k, autoencoder, saver):
@@ -253,7 +248,7 @@ def deep_gen():
         wavobj = get_wav('input.wav')
         transformed = wavobj['data']
         save_wav(wavobj, 'sanity.wav')
-        batches = collect_input(transformed, [SIZE*CHANNELS], repeat=False)
+        batches = collect_input(transformed, [SIZE*CHANNELS])
 
         x = get_input()
         autoencoder = create(x)
