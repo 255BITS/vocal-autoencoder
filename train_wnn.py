@@ -219,26 +219,30 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
 
         #print(input_squares)
         #print("Running " + filename + str(np.shape(input_squares)[0]))
+        
+        i=0
         for square in input_squares:
             square = np.reshape(square, [BATCH_SIZE, SIZE,CHANNELS])
             square = np.swapaxes(square, 1, 2)
-            to_plot = np.reshape(square[0,0,:], [-1])
-            #print(to_plot)
-            plt.clf()
-            plt.plot(to_plot)
+            _, cost, decoded = sess.run([train_step,autoencoder['cost'], autoencoder['decoded']], feed_dict={x: square})
+            i+=1
+            if((i+k) % PLOT_EVERY == 3):
+                to_plot = np.reshape(square[0,0,:], [-1])
+                #print(to_plot)
+                plt.clf()
+                plt.plot(to_plot)
 
-            plt.xlim([0, SIZE])
-            plt.ylim([-2, 2])
-            plt.ylabel("Amplitude")
-            plt.xlabel("Time")
-            ## set the title  
-            plt.title("batch")
-            #plt.show()
-            _, cost, translation, dilation, decoded = sess.run([train_step,autoencoder['cost'], autoencoder['translation'], autoencoder['dilation'], autoencoder['decoded']], feed_dict={x: square})
-            plt.plot(np.reshape(decoded[0,0,:], [-1]))
-            plt.savefig('visualize/input-'+str(k)+'.png')
+                plt.xlim([0, SIZE])
+                plt.ylim([-2, 2])
+                plt.ylabel("Amplitude")
+                plt.xlabel("Time")
+                ## set the title  
+                plt.title("batch")
+                #plt.show()
+                plt.plot(np.reshape(decoded[0,0,:], [-1]))
+                plt.savefig('visualize/input-'+str(k+i)+'.png')
 
-            print(" cost", cost,np.mean(translation), np.mean(dilation), k, filename )
+            print(" cost", cost, k+i, filename )
         #print("Finished " + filename)
         #print(i, " original", batch[0])
         #print( " decoded", sess.run(autoencoder['conv2'], feed_dict={x: input_squares}))
