@@ -21,35 +21,53 @@ import matplotlib.pyplot as plt
 
 PREDICT_ROLL=8
 TRAIN_REPEAT=100000
-SIZE=8192//8
+SIZE=8192*4
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
-BATCH_SIZE=1024
-WAVELETS=SIZE//4
+BATCH_SIZE=256
+WAVELETS=1024*2
 CHANNELS = 1
+
+PLOT_EVERY = 100
 
 SAVE_DIR='save'
 #BATCH_SIZE=349
 layers = [
-    {
-        'type': 'autoencoder',
-        'wavelets': WAVELETS
-    },
-    #{
-    #    'type': 'feedforward',
-    #    'wavelets': WAVELETS
-    #}
+        {
+            'type': 'autoencoder',
+            'wavelets': WAVELETS,
+            'name': 'l1'
+            },
+        #{
+        #    'type': 'autoencoder',
+        #    'wavelets': WAVELETS//2,
+        #    'name': 'l2'
+        #},
+        #{
+        #    'type': 'autoencoder',
+        #    'wavelets': WAVELETS//4,
+        #    'name': 'l3'
+        #},
+        #{
+        #    'type': 'autoencoder',
+        #    'wavelets': WAVELETS//2,
+        #    'name': 'l2'
+        #},
+        #{
+        #    'type': 'feedforward',
+        #    'wavelets': WAVELETS
+        #}
 
-]
+        ]
 
-def wnn_decode(output, output_dim):
+def wnn_decode(output, output_dim, name):
     wavelets = output.get_shape()[1]
-    with tf.variable_scope('wnn_decode'):
+    with tf.variable_scope('wnn_decode_'+name):
         summer = tf.get_variable('summer', [output_dim], initializer= tf.constant_initializer(0))
         w = tf.get_variable('w', [wavelets, output_dim], initializer=tf.truncated_normal_initializer(stddev=0.01, mean=0))
         output = tf.nn.xw_plus_b(output, w, summer)
         return output
 
-def wnn_encode(input, wavelets):
+def wnn_encode(input, wavelets, name):
     # this is the depth of the tree
     dim_in = input.get_shape()[1]
     def initial_dt_tree(a, b, n):
@@ -71,11 +89,12 @@ def wnn_encode(input, wavelets):
         square = tf.square(input)
         start = tf.get_variable("mothersub", 1, initializer=tf.constant_initializer(1.))
         div = tf.get_variable("motherdiv", 1, initializer=tf.constant_initializer(2.))
-        return (start-square)*tf.exp(-square/div)
+        scale = tf.get_variable("motherscale", 1, initializer=tf.constant_initializer(1.))
+        return (scale)*((start-square)*tf.exp(-square/div))
 
         #mortlet
         #return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
-    with tf.variable_scope('wnn_encode'):
+    with tf.variable_scope('wnn_encode_'+name):
         full_resolutions = math.log(wavelets*2)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
         print(tree)
@@ -90,8 +109,8 @@ def wnn_encode(input, wavelets):
         #dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [128,256])
         translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
-        #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(1))
-        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
+        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
+        #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
         #w = tf.ones([dim_in, wavelets])
         input_proj = tf.mul(tf.sub(tf.matmul(input, w), translation),dilation)
         return mother(input_proj)
@@ -101,11 +120,12 @@ def autoencoder(input, layer_def, nextMethod):
     input_dim = int(input.get_shape()[1])
     output_dim = input_dim
     wavelets = layer_def['wavelets']
+    name = layer_def['name']
     print("-- Begin autoencoder", input_dim, input.get_shape())
-    output = wnn_encode(input, wavelets)
+    output = wnn_encode(input, wavelets, name)
 
     output = nextMethod(output)
-    output = wnn_decode(output, output_dim)
+    output = wnn_decode(output, output_dim, name)
 
     # Such as output = build_wavelon(resolution)
     # where build_wavelon is recursively building the input array, one per resolution(1 main, 2*N smaller, 2**M smaller, etc)
@@ -138,14 +158,8 @@ def create(x):
     reconstructed_x = tf.reshape(decoded, [BATCH_SIZE, CHANNELS,SIZE])
     results['decoded']=tf.reshape(decoded, [BATCH_SIZE, CHANNELS,SIZE])
     results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(reconstructed_x-x)))
+    return results
 
-    with tf.variable_scope('wnn_encode'):
-        tf.get_variable_scope().reuse_variables()
-        translation = tf.get_variable('translation', [BATCH_SIZE, WAVELETS])
-        dilation = tf.get_variable('dilation', [BATCH_SIZE, WAVELETS])
-        results['translation' ] = translation
-        results['dilation'] = dilation
-        return results
 
 def get_input():
     return tf.placeholder("float", [BATCH_SIZE, CHANNELS, SIZE], name='x')
@@ -172,18 +186,20 @@ def deep_test():
             for file in glob.glob('training/*.wav'):
                 i+=1
                 learn(file, sess, train_step, x,i, autoencoder, saver)
-                if(i%100==1):
-                    i=i
+                if(i%600==1):
                     print("Saving")
                     saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
         
 
-def collect_input(data, dims):
+def collect_input(data, dims, repeat=True):
     result = []
     i = 0
-    while((i+1)*dims[0]*BATCH_SIZE < len(data)):
-        splitd = data[i*dims[0]*BATCH_SIZE:((i+1)*dims[0]*BATCH_SIZE)]
-        print("split", np.shape(splitd), "data", np.shape(data))
+    step_size = dims[0]*BATCH_SIZE // 16
+    if(repeat == False):
+        step_size = dims[0]*BATCH_SIZE
+    while((i*step_size+dims[0]*BATCH_SIZE) < len(data)):
+        splitd = data[i*step_size:(i*step_size +dims[0]*BATCH_SIZE)]
+        #print("split", np.shape(splitd), "data", np.shape(data))
         result.append(splitd)
         i+= 1
 
@@ -232,7 +248,7 @@ def deep_gen():
         wavobj = get_wav('input.wav')
         transformed = wavobj['data']
         save_wav(wavobj, 'sanity.wav')
-        batches = collect_input(transformed, [SIZE*CHANNELS])
+        batches = collect_input(transformed, [SIZE*CHANNELS], repeat=False)
 
         x = get_input()
         autoencoder = create(x)
