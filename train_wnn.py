@@ -194,11 +194,17 @@ def deep_test():
         
 
 def collect_input(data, dims):
-    length = len(data)
-    # discard extra info
-    arr= np.array(data[0:int(length/dims[0]/BATCH_SIZE)*dims[0]*BATCH_SIZE])
+    result = []
+    i = 0
+    while((i+1)*dims[0]*BATCH_SIZE < len(data)):
+        splitd = data[i*dims[0]*BATCH_SIZE:((i+1)*dims[0]*BATCH_SIZE)]
+        print("split", np.shape(splitd), "data", np.shape(data))
+        result.append(splitd)
+        i+= 1
 
-    reshaped =  arr.reshape((-1, BATCH_SIZE, dims[0]))
+
+    result = np.array(result)
+    reshaped =  np.reshape(result, (-1, BATCH_SIZE, dims[0]))
     return reshaped
 
 def learn(filename, sess, train_step, x, k, autoencoder, saver):
