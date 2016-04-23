@@ -109,8 +109,8 @@ def wnn_encode(input, wavelets, name):
         #dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [128,256])
         translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
-        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
-        #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
+        #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
+        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
         #w = tf.ones([dim_in, wavelets])
         input_proj = tf.mul(tf.sub(tf.matmul(input, w), translation),dilation)
         return mother(input_proj)
@@ -180,13 +180,15 @@ def deep_test():
 
         #output = irfft(filtered)
         i=0
+        j=0
         #write('output.wav', rate, output)
         for trains in range(TRAIN_REPEAT):
             print("Starting epoch", trains)
             for file in glob.glob('training/*.wav'):
                 i+=1
-                learn(file, sess, train_step, x,i, autoencoder, saver)
-                if(i%600==1):
+                k = learn(file, sess, train_step, x,j, autoencoder, saver)
+                j+= k
+                if(i%200==1):
                     print("Saving")
                     saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
         
@@ -246,6 +248,7 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
         #print("Finished " + filename)
         #print(i, " original", batch[0])
         #print( " decoded", sess.run(autoencoder['conv2'], feed_dict={x: input_squares}))
+        return i
 
 def deep_gen():
     with tf.Session() as sess:
