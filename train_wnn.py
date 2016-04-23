@@ -84,7 +84,7 @@ def wnn_encode(input, wavelets, name):
             concat+=tree_right
         return concat
     def mother(input):
-        return (-input)*(-tf.exp(tf.square(input)))
+        #return (-input)*(-tf.exp(tf.square(input)))
         #mexican hat
         #square = tf.square(input)
         #start = tf.get_variable("mothersub", 1, initializer=tf.constant_initializer(1.))
@@ -94,6 +94,7 @@ def wnn_encode(input, wavelets, name):
         #mortlet
         #return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
     with tf.variable_scope('wnn_encode_'+name):
+        return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
         full_resolutions = math.log(wavelets*2)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
         print(tree)
@@ -106,8 +107,8 @@ def wnn_encode(input, wavelets, name):
         d_c = np.tile(d_c,BATCH_SIZE)
         print('-tc',np.shape(t_c))
         print('-dc',d_c)
-        translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, 128])
-        dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, 128])
+        translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, WAVELETS])
+        dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, WAVELETS])
         translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
