@@ -68,11 +68,13 @@ def wnn_encode(input, wavelets):
     def mother(input):
         #return (-input)*(-tf.exp(tf.square(input)))
         #mexican hat
-        #square = tf.square(input)
-        #return (1-square)*tf.exp(-square/2)
+        square = tf.square(input)
+        start = tf.get_variable("mothersub", 1, initializer=tf.constant_initializer(1.))
+        div = tf.get_variable("motherdiv", 1, initializer=tf.constant_initializer(2.))
+        return (start-square)*tf.exp(-square/div)
 
         #mortlet
-        return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
+        #return 0.75112554446494 * tf.cos(input * 5.336446256636997) * tf.exp((-tf.square(input)) / 2)
     with tf.variable_scope('wnn_encode'):
         full_resolutions = math.log(wavelets*2)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
