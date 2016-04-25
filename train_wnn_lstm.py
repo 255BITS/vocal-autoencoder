@@ -23,11 +23,11 @@ PREDICT_ROLL=8
 TRAIN_REPEAT=100000
 SIZE=256
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
-BATCH_SIZE=1024
+BATCH_SIZE=16
 WAVELETS=256
 Z_SIZE=64#WAVELETS//4
 CHANNELS = 1
-SEQ_LENGTH = 4
+SEQ_LENGTH = 32
 
 PLOT_EVERY = 50
 SAVE_EVERY = 200
@@ -159,6 +159,17 @@ def linear(input_, output_size, scope=None, stddev=0.2, bias_start=0.0, with_w=F
             return tf.matmul(input_, matrix) + bias
 
 
+def lstm_softmax(output):
+    memory = Z_SIZE
+    cell = rnn_cell.BasicLSTMCell(memory)
+    enc_inp = output
+    dec_inp = enc_inp#[tf.zeros_like(enc_inp[0], name="GO")]+ enc_inp[:-1]
+    dec_outputs, dec_state = seq2seq.basic_rnn_seq2seq(enc_inp, dec_inp, cell)
+    print("dec_outputs  is", dec_outputs)
+    return dec_outputs#[tf.nn.softmax(o) for o in dec_outputs]
+
+
+
 def softmax_layer(output, layer_def, nextMethod):
     name = layer_def['name']
     size = layer_def['size']
@@ -166,7 +177,7 @@ def softmax_layer(output, layer_def, nextMethod):
     [output, soft] = output#tf.split(1, 2, output)
     input_dim = int(output[0].get_shape()[1])//2
 
-    soft = [tf.nn.softmax(s) for s in soft]
+    soft = lstm_softmax(soft)
 
     sizes_down = [WAVELETS//2]
     sizes_up = reversed(sizes_down)
@@ -242,7 +253,11 @@ def deep_test():
         x = get_input()
         autoencoder = create(x)
         #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
-        train_step = tf.train.AdamOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
+        optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
+        grad_clip = 5.
+        tvars = tf.trainable_variables()
+        grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder['cost'], tvars), grad_clip)
+        train_step = optimizer.apply_gradients(zip(grads, tvars))
         #train_step = None
         init = tf.initialize_all_variables()
         sess.run(init)
