@@ -21,10 +21,11 @@ import matplotlib.pyplot as plt
 
 PREDICT_ROLL=8
 TRAIN_REPEAT=100000
-SIZE=441*4
+SIZE=256
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
-BATCH_SIZE=4096
-WAVELETS=64*4
+BATCH_SIZE=1024
+WAVELETS=256
+Z_SIZE=64#WAVELETS//4
 CHANNELS = 1
 
 PLOT_EVERY = 50
@@ -38,6 +39,22 @@ layers = [
             'wavelets': WAVELETS,
             'name': 'l1'
             },
+        {
+            'type': 'softmax',
+            'name': 's1',
+            'size': WAVELETS,
+            },
+        #   {
+        #    'type': 'autoencoder',
+        #    'wavelets': WAVELETS,
+        #    'name': 'l2'
+        #    },
+        #{
+        #    'type': 'softmax',
+        #    'name':'s2'
+        #    },
+            
+        
         #{
         #    'type': 'autoencoder',
         #    'wavelets': WAVELETS//2,
@@ -112,26 +129,67 @@ def wnn_encode(input, wavelets, name):
         d_c = np.tile(d_c,BATCH_SIZE)
         print('-tc',np.shape(t_c))
         print('-dc',d_c)
-        translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, WAVELETS])
-        dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, WAVELETS])
+        translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
+        dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
         translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
         w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
         #w = tf.ones([dim_in, wavelets])
         input_proj = tf.mul(tf.sub(tf.matmul(input, w), translation),dilation)
-        return mother(input_proj)
+        #killer = tf.greater(dilation, 0.01225)
+        #killer = tf.cast(killer, tf.float32)
+        return mother(input_proj)#*killer
 
 
+def linear(input_, output_size, scope=None, stddev=0.2, bias_start=0.0, with_w=False):
+    shape = input_.get_shape().as_list()
+
+    with tf.variable_scope(scope or "Linear"):
+        matrix = tf.get_variable("Matrix", [shape[1], output_size], tf.float32,
+                tf.random_normal_initializer(stddev=stddev))
+        bias = tf.get_variable("bias", [output_size],
+                initializer=tf.constant_initializer(bias_start))
+        if with_w:
+            return tf.matmul(input_, matrix) + bias, matrix, bias
+        else:
+            return tf.matmul(input_, matrix) + bias
+
+
+def softmax_layer(output, layer_def, nextMethod):
+    name = layer_def['name']
+    size = layer_def['size']
+
+    [output, soft] = output#tf.split(1, 2, output)
+    input_dim = int(output.get_shape()[1])//2
+
+    soft = tf.nn.softmax(soft)
+
+    sizes_down = [WAVELETS//2]
+    sizes_up = reversed(sizes_down)
+    for size in sizes_down:
+        output = linear(output, size, name+'down'+str(size))
+        output = tf.nn.tanh(output)
+    #output = soft
+    #output = tf.nn.softmax(output)
+    output = linear(output, Z_SIZE, name+'downlast')
+    output = tf.mul(output,soft)
+    for size in sizes_up:
+        output = linear(output, size, name+'up'+str(size))
+        output = tf.nn.tanh(output)
+    output = linear(output, WAVELETS, name+'uplast')
+    return output
 def autoencoder(input, layer_def, nextMethod):
     input_dim = int(input.get_shape()[1])
     output_dim = input_dim
     wavelets = layer_def['wavelets']
     name = layer_def['name']
     print("-- Begin autoencoder", input_dim, input.get_shape())
-    output = wnn_encode(input, wavelets, name)
+    output = input
+    soft = wnn_encode(output, Z_SIZE, name+'lin')
+    output = wnn_encode(output, wavelets, name)
 
-    output = nextMethod(output)
+    output = nextMethod([output,soft])
     output = wnn_decode(output, output_dim, name)
 
     # Such as output = build_wavelon(resolution)
@@ -147,7 +205,8 @@ def autoencoder(input, layer_def, nextMethod):
 layer_index=0
 def create(x):
     ops = {
-        'autoencoder':autoencoder
+        'autoencoder':autoencoder,
+        'softmax':softmax_layer
     }
 
 
@@ -195,10 +254,7 @@ def deep_test():
                 i+=1
                 k = learn(file, sess, train_step, x,j, autoencoder, saver)
                 j+= k
-                if(i%SAVE_EVERY==1):
-                    print("Saving")
-                    saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
-        
+       
 
 def collect_input(data, dims):
     length = len(data)
@@ -241,7 +297,10 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
                 #plt.show()
                 plt.plot(np.reshape(decoded[0,0,:], [-1]))
                 plt.savefig('visualize/input-'+str(k+i)+'.png')
-
+            if((i+k)%SAVE_EVERY==1):
+                print("Saving")
+                saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
+ 
             print(" cost", cost, k+i, filename )
         #print("Finished " + filename)
         #print(i, " original", batch[0])
@@ -278,6 +337,7 @@ def deep_gen():
             all_out.append(np.swapaxes(decoded, 1, 2))
         all_out = np.array(all_out)
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
+        print(all_out)
         print('saving to output2.wav', np.min(all_out), np.max(all_out))
         save_wav(wavobj, 'output2.wav')
                        
