@@ -62,11 +62,16 @@ layers = [
 
 def wnn_decode(output, output_dim, name):
     wavelets = output.get_shape()[1]
+    with tf.variable_scope('wnn_encode_'+name):
+        tf.get_variable_scope().reuse_variables()
+        w = tf.get_variable('w', [output_dim, wavelets])
+        w = tf.transpose(w)
     with tf.variable_scope('wnn_decode_'+name):
         summer = tf.get_variable('summer', [output_dim], initializer= tf.constant_initializer(0))
-        w = tf.get_variable('w', [wavelets, output_dim], initializer=tf.random_normal_initializer(stddev=0.01, mean=0))
         output = tf.nn.xw_plus_b(output, w, summer)
         return output
+
+
 
 def wnn_encode(input, wavelets, name):
     # this is the depth of the tree
