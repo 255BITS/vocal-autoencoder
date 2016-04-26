@@ -11,7 +11,7 @@ import glob
 from wav import loadfft2, savefft2, get_wav, save_wav
 
 
-from tensorflow.models.rnn import rnn_cell
+from tensorflow.models.rnn import rnn_cell, rnn
 from tensorflow.models.rnn import seq2seq
 
 
@@ -23,7 +23,7 @@ PREDICT_ROLL=8
 TRAIN_REPEAT=100000
 SIZE=256
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
-BATCH_SIZE=16
+BATCH_SIZE=64
 WAVELETS=256
 Z_SIZE=64#WAVELETS//4
 CHANNELS = 1
@@ -159,14 +159,24 @@ def linear(input_, output_size, scope=None, stddev=0.2, bias_start=0.0, with_w=F
             return tf.matmul(input_, matrix) + bias
 
 
+lstm_state = None
+lstm_dec_state = None
 def lstm_softmax(output):
+    global lstm_state,lstm_dec_state
+    out_shape = output[0].get_shape()[1]
     memory = Z_SIZE
     cell = rnn_cell.BasicLSTMCell(memory)
-    enc_inp = output
-    dec_inp = enc_inp#[tf.zeros_like(enc_inp[0], name="GO")]+ enc_inp[:-1]
-    dec_outputs, dec_state = seq2seq.basic_rnn_seq2seq(enc_inp, dec_inp, cell)
+    cell = rnn_cell.MultiRNNCell([cell]*2)
+    if(lstm_state == None):
+        lstm_state = cell.zero_state(batch_size=BATCH_SIZE, dtype=tf.float32)
+    #enc_inp = output
+    #dec_inp = [tf.zeros_like(enc_inp[0], name="GO")]+ enc_inp[:-1]
+    #dec_outputs, dec_state = seq2seq.basic_rnn_seq2seq(enc_inp, dec_inp, cell)
+    dec_outputs, lstm_dec_state = rnn.rnn(cell, output,initial_state=lstm_state, dtype=tf.float32)
     print("dec_outputs  is", dec_outputs)
-    return dec_outputs#[tf.nn.softmax(o) for o in dec_outputs]
+    #dec_outputs = [linear(o, out_shape, 'dec_out'+str(i)) for i,o in enumerate(dec_outputs)]
+    #dec_outputs = [tf.nn.sigmoid(o) for o in dec_outputs]
+    return dec_outputs
 
 
 
@@ -187,7 +197,8 @@ def softmax_layer(output, layer_def, nextMethod):
     #output = soft
     #output = tf.nn.softmax(output)
     output = [linear(output[i], Z_SIZE, name+'downlast', reuse=i > 0) for i in range(SEQ_LENGTH)]
-    output = [tf.mul(o,s) for o,s in zip(output, soft)]
+    noise = tf.random_normal(output[0].get_shape(), stddev=0.001)
+    output = [s for o,s in zip(output, soft)]
     for size in sizes_up:
         output = [linear(output[i], size, name+'up'+str(size), reuse=i > 0) for i in range(SEQ_LENGTH)]
         output = [tf.nn.tanh(o) for o in output]
@@ -221,7 +232,9 @@ def autoencoder(input, layer_def, nextMethod):
 
 
 layer_index=0
-def create(x):
+def create(x,y=None):
+    if y is None:
+        y = tf.ones_like(x)
     ops = {
         'autoencoder':autoencoder,
         'softmax':softmax_layer
@@ -239,19 +252,38 @@ def create(x):
 
     #flat_x = tf.reshape(x, [BATCH_SIZE, -1])
     decoded = ops[layers[0]['type']](x, layers[0], nextMethod)
-    reconstructed_x = tf.reshape(decoded, [BATCH_SIZE, SEQ_LENGTH, CHANNELS,SIZE])
+
+    #reconstructed_x = tf.reshape(output, [BATCH_SIZE, SEQ_LENGTH, CHANNELS,SIZE])
     results['decoded']=tf.reshape(decoded, [BATCH_SIZE, SEQ_LENGTH, CHANNELS,SIZE])
-    results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(reconstructed_x-x)))
+    y = tf.reshape(y, [BATCH_SIZE, SEQ_LENGTH, CHANNELS, SIZE])
+    def get_entropy(o):
+        return tf.reshape(o,[BATCH_SIZE,-1])
+        os = tf.split(1, SEQ_LENGTH, o)
+        return [tf.reshape(o, [BATCH_SIZE, -1]) for o in os]
+    d = get_entropy(results['decoded'])
+    ys = get_entropy(y)
+    #xent = 1/2*tf.abs(ys-d)+((-1)/2*tf.sign(d)*ys)+(tf.cast(-1/2*(tf.sign(d)*tf.sign(ys)) > 0, dtype=tf.float32))
+    xent = tf.square(ys-d)
+    results['cost']=tf.sqrt(tf.reduce_mean(xent))#+((-1)/2*tf.reduce_mean(tf.sign(d)*ys))
+    #results['cost']=results['cost']
+    #results['cost']=tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(xent, tf.zeros_like(ys)))
+    #results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(reconstructed_x-x)))
+    #results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(y-results['decoded'])))
     return results
 
 
 def get_input():
     return tf.placeholder("float", [BATCH_SIZE, SEQ_LENGTH, CHANNELS, SIZE], name='x')
+def get_y():
+    return tf.placeholder("float", [BATCH_SIZE, SEQ_LENGTH, CHANNELS, SIZE], name='y')
 def deep_test():
+        global learn_state,lstm_state
         sess = tf.Session()
 
         x = get_input()
-        autoencoder = create(x)
+        y = get_y()
+        autoencoder = create(x, y)
+        learn_state = sess.run(lstm_state)
         #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
         optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
         grad_clip = 5.
@@ -274,19 +306,29 @@ def deep_test():
             print("Starting epoch", trains)
             for file in glob.glob('training/*.wav'):
                 i+=1
-                k = learn(file, sess, train_step, x,j, autoencoder, saver)
+                k = learn(file, sess, train_step, x,y,j, autoencoder, saver)
                 j+= k
        
 
-def collect_input(data, dims):
-    length = len(data)
+def collect_input(data, dims, pad=False):
     # discard extra info
+
+    if(pad and len(data) < dims[0]*BATCH_SIZE*SEQ_LENGTH):
+        zeros=np.zeros(dims[0]*BATCH_SIZE*SEQ_LENGTH)
+        zeros[:len(data)]= data
+        print(np.array(zeros))
+        data = zeros
+    length = len(data)
     arr= np.array(data[0:int(length/dims[0]/BATCH_SIZE/SEQ_LENGTH)*dims[0]*BATCH_SIZE*SEQ_LENGTH])
+    print(np.shape(arr), "SHAPE")
+
     
     reshaped =  arr.reshape((-1, BATCH_SIZE, dims[0]))
     return reshaped
 
-def learn(filename, sess, train_step, x, k, autoencoder, saver):
+learn_state = None
+def learn(filename, sess, train_step, x, y,k, autoencoder, saver):
+        global lstm_state,lstm_dec_state, learn_state
         #print("Loading "+filename)
         # not really loading fft
         wavobj = get_wav(filename)
@@ -294,18 +336,21 @@ def learn(filename, sess, train_step, x, k, autoencoder, saver):
         rate = wavobj['rate']
 
         input_squares = collect_input(transformed_raw, [SIZE*CHANNELS*SEQ_LENGTH])
+        y_squares = np.roll(input_squares, -SIZE)
 
         #print(input_squares)
         #print("Running " + filename + str(np.shape(input_squares)[0]))
         
         i=0
-        for square in input_squares:
+        for square,y_square in zip(input_squares, y_squares):
             square = np.reshape(square, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
             square = np.swapaxes(square, 2, 3)
-            _, cost, decoded = sess.run([train_step,autoencoder['cost'], autoencoder['decoded']], feed_dict={x: square})
+            y_square = np.reshape(y_square, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
+            y_square = np.swapaxes(y_square, 2, 3)
+            _, cost, decoded,learn_state = sess.run([train_step,autoencoder['cost'], autoencoder['decoded'], lstm_dec_state], feed_dict={x: square, y:y_square, lstm_state: learn_state})
             i+=1
             if((i+k) % PLOT_EVERY == 3):
-                to_plot = np.reshape(square[0,0,0,:], [-1])
+                to_plot = np.reshape(y_square[0,0,0,:], [-1])
                 #print(to_plot)
                 plt.clf()
                 plt.plot(to_plot)
@@ -334,7 +379,7 @@ def deep_gen():
         wavobj = get_wav('input.wav')
         transformed = wavobj['data']
         save_wav(wavobj, 'sanity.wav')
-        batches = collect_input(transformed, [SIZE*CHANNELS*SEQ_LENGTH])
+        batches = collect_input(transformed, [SIZE*CHANNELS*SEQ_LENGTH], pad=True)
 
         x = get_input()
         autoencoder = create(x)
@@ -352,10 +397,17 @@ def deep_gen():
 
 
         all_out=[]
+        decoded = None
         for batch in batches:
             batch = np.reshape(batch, [BATCH_SIZE, SEQ_LENGTH, SIZE, CHANNELS])
             batch =np.swapaxes(batch, 2, 3)
-            decoded = sess.run(autoencoder['decoded'], feed_dict={x: np.array(batch)})
+            if(decoded is None):
+                decoded = batch# * 0.9 + np.random.uniform(-0.1, 0.1, batch.shape)
+            else:
+                decoded = decoded * 0.1 + batch*0.8 + np.random.uniform(-0.1, 0.1, batch.shape)
+
+            #batch += np.random.uniform(-0.1,0.1,batch.shape)
+            decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
             all_out.append(np.swapaxes(decoded, 2, 3))
         all_out = np.array(all_out)
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
