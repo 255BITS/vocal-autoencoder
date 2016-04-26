@@ -278,7 +278,7 @@ def get_input():
     return tf.placeholder("float", [BATCH_SIZE, SEQ_LENGTH, CHANNELS, SIZE], name='x')
 def get_y():
     return tf.placeholder("float", [BATCH_SIZE, SEQ_LENGTH, CHANNELS, SIZE], name='y')
-def deep_train():
+def deep_train(clobber=False):
         global learn_state,lstm_state
         sess = tf.Session()
 
@@ -287,16 +287,11 @@ def deep_train():
         autoencoder = create(x, y)
         learn_state = sess.run(lstm_state)
         #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
-        optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
-        grad_clip = 5.
-        tvars = tf.trainable_variables()
-        grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder['cost'], tvars), grad_clip)
-        train_step = optimizer.apply_gradients(zip(grads, tvars))
-        #train_step = None
+        train_step = create_cost_optimizer(autoencoder)
+        create_pretrain_cost_optimizer(autoencoder)
         init = tf.initialize_all_variables()
         sess.run(init)
-        saver = tf.train.Saver(tf.all_variables())
-        saver.save(sess, SAVE_DIR+'/modellstm3.ckpt', global_step=0)
+        saver = save_or_load(sess, clobber)
 
         tf.train.write_graph(sess.graph_def, 'log', 'modellstm3.pbtxt', False)
 
@@ -441,23 +436,33 @@ def deep_gen():
         print('saving to output2.wav', np.min(all_out), np.max(all_out))
         save_wav(wavobj, 'output2.wav')
 
-def deep_pretrain():
-        sess = tf.Session()
-
-        x = get_input()
-        autoencoder = create(x)
-        learn_state = sess.run(lstm_state)
-        #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
+def create_cost_optimizer(autoencoder):
+        optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
+        grad_clip = 5.
+        tvars = tf.trainable_variables()
+        grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder['cost'], tvars), grad_clip)
+        train_step = optimizer.apply_gradients(zip(grads, tvars))
+        return train_step
+def create_pretrain_cost_optimizer(autoencoder):
         optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
         grad_clip = 5.
         tvars = tf.trainable_variables()
         grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder['pretrain_cost'], tvars), grad_clip)
         train_step = optimizer.apply_gradients(zip(grads, tvars))
-        #train_step = None
+        return train_step
+
+
+def deep_pretrain(clobber=False):
+        sess = tf.Session()
+
+        x = get_input()
+        autoencoder = create(x)
+        learn_state = sess.run(lstm_state)
+        create_cost_optimizer(autoencoder)
+        train_step = create_pretrain_cost_optimizer(autoencoder)
         init = tf.initialize_all_variables()
         sess.run(init)
-        saver = tf.train.Saver(tf.all_variables())
-        saver.save(sess, SAVE_DIR+'/modellstm3.ckpt', global_step=0)
+        saver = save_or_load(sess,clobber)
 
         tf.train.write_graph(sess.graph_def, 'log', 'modellstm3.pbtxt', False)
 
@@ -472,14 +477,30 @@ def deep_pretrain():
                 k = pretrain_learn(file, sess, train_step, x,None,j, autoencoder, saver)
                 j+= k
  
+def save_or_load(sess, clobber):
+    if(clobber):
+        print("Saving ...")
+        saver = tf.train.Saver(tf.all_variables())
+        saver.save(sess, SAVE_DIR+'/modellstm3.ckpt', global_step=0)
+    else:
+        print("Loading ...")
+        saver = tf.train.Saver()
+        checkpoint = tf.train.get_checkpoint_state(SAVE_DIR)
+        saver.restore(sess, checkpoint.model_checkpoint_path)
+
+    return saver
                        
 if __name__ == '__main__':
+    clobber = False
+    if(len(sys.argv) > 2 and sys.argv[2] == '--clobber'):
+        clobber = True
+
     if(sys.argv[1] == 'train'):
         print("Train")
-        deep_train()
+        deep_train(clobber = clobber)
     elif(sys.argv[1] == 'pretrain'):
         print('pretrain')
-        deep_pretrain()
+        deep_pretrain(clobber =clobber)
     else:
         print("Generate")
         deep_gen()
