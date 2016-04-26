@@ -41,9 +41,7 @@ layers = [
             'name': 'l1'
             },
         {
-            'type': 'softmax',
-            'name': 's1',
-            'size': WAVELETS,
+            'type': 'rnn',
             },
         #   {
         #    'type': 'autoencoder',
@@ -161,12 +159,12 @@ def linear(input_, output_size, scope=None, stddev=0.2, bias_start=0.0, with_w=F
 
 lstm_state = None
 lstm_dec_state = None
-def lstm_softmax(output):
+def lstm(output):
     global lstm_state,lstm_dec_state
     out_shape = output[0].get_shape()[1]
     memory = Z_SIZE
     cell = rnn_cell.BasicLSTMCell(memory)
-    cell = rnn_cell.MultiRNNCell([cell]*2)
+    cell = rnn_cell.MultiRNNCell([cell]*1)
     if(lstm_state == None):
         lstm_state = cell.zero_state(batch_size=BATCH_SIZE, dtype=tf.float32)
     #enc_inp = output
@@ -180,45 +178,36 @@ def lstm_softmax(output):
 
 
 
-def softmax_layer(output, layer_def, nextMethod):
+def rnn_layer(output, layer_def, nextMethod):
+    output = lstm(output)
+
+    return output
+def autoencoder(input, layer_def, nextMethod):
+    output_dim = int(input.get_shape()[3])
+    wavelets = layer_def['wavelets']
     name = layer_def['name']
-    size = layer_def['size']
+    return build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=True)
 
-    [output, soft] = output#tf.split(1, 2, output)
-    input_dim = int(output[0].get_shape()[1])//2
+def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False):
+    output = tf.split(1, SEQ_LENGTH, input)
+    output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+    output = [linear(output[i], Z_SIZE, name+'downlast', reuse=reuse or i > 0)  for i in range(SEQ_LENGTH)]
+    print("OUTPUT DIM IS", output_dim)
 
-    soft = lstm_softmax(soft)
+    if nextMethod is not None:
+        output = nextMethod(output)
 
     sizes_down = [WAVELETS//2]
     sizes_up = reversed(sizes_down)
-    for size in sizes_down:
-        output = [linear(output[i], size, name+'down'+str(size), reuse=i > 0) for i in range(SEQ_LENGTH)]
-        output = [tf.nn.tanh(o) for o in output]
-    #output = soft
-    #output = tf.nn.softmax(output)
-    output = [linear(output[i], Z_SIZE, name+'downlast', reuse=i > 0) for i in range(SEQ_LENGTH)]
-    noise = tf.random_normal(output[0].get_shape(), stddev=0.001)
-    output = [s for o,s in zip(output, soft)]
     for size in sizes_up:
-        output = [linear(output[i], size, name+'up'+str(size), reuse=i > 0) for i in range(SEQ_LENGTH)]
+        output = [linear(output[i], size, name+'up'+str(size), reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
         output = [tf.nn.tanh(o) for o in output]
-    output = [linear(output[i], WAVELETS, name+'uplast', reuse=i > 0)  for i in range(SEQ_LENGTH)]
-    return output
-def autoencoder(input, layer_def, nextMethod):
-    input_dim = int(input.get_shape()[3])
-    print("output dim is", input_dim)
-    output_dim = input_dim
-    wavelets = layer_def['wavelets']
-    name = layer_def['name']
-    print("-- Begin autoencoder", input_dim, input.get_shape())
-    #output = input
-    output = tf.split(1, SEQ_LENGTH, input)
-    soft = [wnn_encode(tf.squeeze(output[i]), Z_SIZE, name+'lin', reuse = i > 0) for i in range(SEQ_LENGTH)]
-    output = [wnn_encode(tf.squeeze(output[i]), wavelets, name, reuse = i > 0) for i in range(SEQ_LENGTH)]
 
-    output = nextMethod([output,soft])
-    output = [wnn_decode(output[i], output_dim, name, reuse = i>0) for i in range(SEQ_LENGTH)]
-    output = [tf.reshape(o, [BATCH_SIZE, 1, CHANNELS*SIZE]) for o in output]
+    output = [linear(output[i], WAVELETS, name+'uplast', reuse=reuse or i > 0)  for i in range(SEQ_LENGTH)]
+
+    output = [wnn_decode(output[i], output_dim, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+
+    output = [tf.reshape(o, [BATCH_SIZE, 1, CHANNELS, SIZE]) for o in output]
     output = tf.concat(1, output)
 
     # Such as output = build_wavelon(resolution)
@@ -230,6 +219,16 @@ def autoencoder(input, layer_def, nextMethod):
     return output
 
 
+def deep_autoencoder(output):
+    name = 'l1'
+    wavelets = WAVELETS
+    nonlinear = lambda output: [tf.nn.sigmoid(o) for o in output]
+    output_dim = int(output.get_shape()[3])
+    output = build_autoencoder(output, wavelets, name, output_dim, nonlinear, reuse=False)
+
+    return output
+
+
 
 layer_index=0
 def create(x,y=None):
@@ -237,8 +236,9 @@ def create(x,y=None):
         y = tf.ones_like(x)
     ops = {
         'autoencoder':autoencoder,
-        'softmax':softmax_layer
+        'rnn':rnn_layer
     }
+    autoencoded_x = deep_autoencoder(x)
 
 
     results = {}
@@ -265,6 +265,8 @@ def create(x,y=None):
     #xent = 1/2*tf.abs(ys-d)+((-1)/2*tf.sign(d)*ys)+(tf.cast(-1/2*(tf.sign(d)*tf.sign(ys)) > 0, dtype=tf.float32))
     xent = tf.square(ys-d)
     results['cost']=tf.sqrt(tf.reduce_mean(xent))#+((-1)/2*tf.reduce_mean(tf.sign(d)*ys))
+    results['pretrain_cost']=tf.sqrt(tf.reduce_mean(tf.square(autoencoded_x-x)))
+    results['autoencoded_x']=autoencoded_x
     #results['cost']=results['cost']
     #results['cost']=tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(xent, tf.zeros_like(ys)))
     #results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(reconstructed_x-x)))
@@ -329,8 +331,7 @@ def collect_input(data, dims, pad=False):
 learn_state = None
 def learn(filename, sess, train_step, x, y,k, autoencoder, saver):
         global lstm_state,lstm_dec_state, learn_state
-        #print("Loading "+filename)
-        # not really loading fft
+
         wavobj = get_wav(filename)
         transformed_raw = wavobj['data']
         rate = wavobj['rate']
@@ -338,9 +339,6 @@ def learn(filename, sess, train_step, x, y,k, autoencoder, saver):
         input_squares = collect_input(transformed_raw, [SIZE*CHANNELS*SEQ_LENGTH])
         y_squares = np.roll(input_squares, -SIZE)
 
-        #print(input_squares)
-        #print("Running " + filename + str(np.shape(input_squares)[0]))
-        
         i=0
         for square,y_square in zip(input_squares, y_squares):
             square = np.reshape(square, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
@@ -351,7 +349,6 @@ def learn(filename, sess, train_step, x, y,k, autoencoder, saver):
             i+=1
             if((i+k) % PLOT_EVERY == 3):
                 to_plot = np.reshape(y_square[0,0,0,:], [-1])
-                #print(to_plot)
                 plt.clf()
                 plt.plot(to_plot)
 
@@ -361,7 +358,6 @@ def learn(filename, sess, train_step, x, y,k, autoencoder, saver):
                 plt.xlabel("Time")
                 ## set the title  
                 plt.title("batch")
-                #plt.show()
                 plt.plot(np.reshape(decoded[0,0,0,:], [-1]))
                 plt.savefig('visualize/input-'+str(k+i)+'.png')
             if((i+k)%SAVE_EVERY==1):
@@ -369,10 +365,40 @@ def learn(filename, sess, train_step, x, y,k, autoencoder, saver):
                 saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
  
             print(" cost", cost, k+i, filename )
-        #print("Finished " + filename)
-        #print(i, " original", batch[0])
-        #print( " decoded", sess.run(autoencoder['conv2'], feed_dict={x: input_squares}))
         return i
+
+def pretrain_learn(filename, sess, train_step, x, y,k, autoencoder, saver):
+        wavobj = get_wav(filename)
+        transformed_raw = wavobj['data']
+        rate = wavobj['rate']
+
+        input_squares = collect_input(transformed_raw, [SIZE*CHANNELS*SEQ_LENGTH])
+
+        i=0
+        for square in input_squares:
+            square = np.reshape(square, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
+            square = np.swapaxes(square, 2, 3)
+            _, cost, decoded  = sess.run([train_step,autoencoder['pretrain_cost'], autoencoder['autoencoded_x']], feed_dict={x: square})
+            i+=1
+            if((i+k) % PLOT_EVERY == 3):
+                to_plot = np.reshape(square[0,0,0,:], [-1])
+                plt.clf()
+                plt.plot(to_plot)
+
+                plt.xlim([0, SIZE])
+                plt.ylim([-2, 2])
+                plt.ylabel("Amplitude")
+                plt.xlabel("Time")
+                plt.title("batch")
+                plt.plot(np.reshape(decoded[0,0,0,:], [-1]))
+                plt.savefig('visualize/input-'+str(k+i)+'.png')
+            if((i+k)%SAVE_EVERY==1):
+                print("Saving")
+                saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
+ 
+            print(" cost", cost, k+i, filename )
+        return i
+
 
 def deep_gen():
     with tf.Session() as sess:
@@ -414,11 +440,46 @@ def deep_gen():
         print(all_out)
         print('saving to output2.wav', np.min(all_out), np.max(all_out))
         save_wav(wavobj, 'output2.wav')
+
+def deep_pretrain():
+        sess = tf.Session()
+
+        x = get_input()
+        autoencoder = create(x)
+        learn_state = sess.run(lstm_state)
+        #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
+        optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
+        grad_clip = 5.
+        tvars = tf.trainable_variables()
+        grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder['pretrain_cost'], tvars), grad_clip)
+        train_step = optimizer.apply_gradients(zip(grads, tvars))
+        #train_step = None
+        init = tf.initialize_all_variables()
+        sess.run(init)
+        saver = tf.train.Saver(tf.all_variables())
+        saver.save(sess, SAVE_DIR+'/modellstm3.ckpt', global_step=0)
+
+        tf.train.write_graph(sess.graph_def, 'log', 'modellstm3.pbtxt', False)
+
+        #output = irfft(filtered)
+        i=0
+        j=0
+        #write('output.wav', rate, output)
+        for trains in range(TRAIN_REPEAT):
+            print("Starting epoch", trains)
+            for file in glob.glob('training/*.wav'):
+                i+=1
+                k = pretrain_learn(file, sess, train_step, x,None,j, autoencoder, saver)
+                j+= k
+ 
                        
 if __name__ == '__main__':
     if(sys.argv[1] == 'train'):
         print("Train")
         deep_test()
+    elif(sys.argv[1] == 'pretrain'):
+        print('pretrain')
+        deep_pretrain()
     else:
         print("Generate")
         deep_gen()
