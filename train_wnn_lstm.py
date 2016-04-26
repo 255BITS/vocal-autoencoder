@@ -278,7 +278,7 @@ def get_input():
     return tf.placeholder("float", [BATCH_SIZE, SEQ_LENGTH, CHANNELS, SIZE], name='x')
 def get_y():
     return tf.placeholder("float", [BATCH_SIZE, SEQ_LENGTH, CHANNELS, SIZE], name='y')
-def deep_test():
+def deep_train():
         global learn_state,lstm_state
         sess = tf.Session()
 
@@ -476,7 +476,7 @@ def deep_pretrain():
 if __name__ == '__main__':
     if(sys.argv[1] == 'train'):
         print("Train")
-        deep_test()
+        deep_train()
     elif(sys.argv[1] == 'pretrain'):
         print('pretrain')
         deep_pretrain()
