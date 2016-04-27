@@ -188,9 +188,9 @@ def autoencoder(input, layer_def, nextMethod):
     output_dim = int(input.get_shape()[3])
     wavelets = layer_def['wavelets']
     name = layer_def['name']
-    return build_autoencoder(input, y, wavelets, name, output_dim, nextMethod, reuse=True)
+    return build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=True)
 
-def build_autoencoder(input, y, wavelets, name, output_dim, nextMethod, reuse=False):
+def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False):
     output = tf.split(1, SEQ_LENGTH, input)
     orig_output = output
     output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
