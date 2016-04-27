@@ -440,6 +440,8 @@ def create_cost_optimizer(autoencoder):
         optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
         grad_clip = 5.
         tvars = tf.trainable_variables()
+        tvars = [var for var in tvars if 'RNN' in var.name]
+        print("train trainables", [ v.name for v in tvars])
         grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder['cost'], tvars), grad_clip)
         train_step = optimizer.apply_gradients(zip(grads, tvars))
         return train_step
@@ -447,6 +449,8 @@ def create_pretrain_cost_optimizer(autoencoder):
         optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
         grad_clip = 5.
         tvars = tf.trainable_variables()
+        tvars = [var for var in tvars if 'l1' in var.name]
+        print("Pretrain trainables", [ v.name for v in tvars])
         grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder['pretrain_cost'], tvars), grad_clip)
         train_step = optimizer.apply_gradients(zip(grads, tvars))
         return train_step
