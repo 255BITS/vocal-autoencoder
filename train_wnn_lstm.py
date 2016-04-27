@@ -215,8 +215,8 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
 
     global loss_term
     #loss_term = tf.concat(1, [phi-tf.minimum(tf.abs(o), phi) for o in output])
-    loss_term = [tf.maximum(0., -tf.log(o*5)) for o in output]
-    loss_term = [l * 10 for l in loss_term]
+    loss_term = tf.concat(1, output)
+    loss_term = tf.maximum(0., -tf.log(loss_term*5))*10
     output = [wnn_decode(output[i], output_dim, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
 
     output = [tf.reshape(o, [BATCH_SIZE, 1, CHANNELS, SIZE]) for o in output]
@@ -278,8 +278,8 @@ def create(x,y=None):
     sqs = tf.square(ys-d)
     global loss_term
     print("LOSS TERM", loss_term)
-    results['cost']=2*tf.sqrt(tf.reduce_mean(sqs))+tf.add_n([tf.reduce_mean(lt) for lt in loss_term])# + tf.sqrt(tf.reduce_mean(sqs2))#+((-1)/2*tf.reduce_mean(tf.sign(d)*ys))
-    results['pretrain_cost']=tf.sqrt(tf.reduce_mean(tf.square(autoencoded_x-x)))+tf.add_n([tf.reduce_mean(lt) for lt in loss_term])
+    results['cost']=2*tf.sqrt(tf.reduce_mean(sqs))+tf.reduce_mean(loss_term)# + tf.sqrt(tf.reduce_mean(sqs2))#+((-1)/2*tf.reduce_mean(tf.sign(d)*ys))
+    results['pretrain_cost']=tf.sqrt(tf.reduce_mean(tf.square(autoencoded_x-x)))+tf.reduce_mean(loss_term)
     results['autoencoded_x']=autoencoded_x
     #results['cost']=results['cost']
     #results['cost']=tf.reduce_mean(1/tf.nn.sigmoid_cross_entropy_with_logits(tf.concat(1, dec_outputs), tf.concat(1, y_in_z)))
