@@ -178,7 +178,9 @@ def lstm(output):
 
 
 
-def rnn_layer(output, layer_def, nextMethod):
+def rnn_layer(output,layer_def, nextMethod):
+    output, extra = output
+    output = [e for o, e in zip(output,extra)]
     output = lstm(output)
 
     return output
@@ -186,19 +188,25 @@ def autoencoder(input, layer_def, nextMethod):
     output_dim = int(input.get_shape()[3])
     wavelets = layer_def['wavelets']
     name = layer_def['name']
-    return build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=True)
+    return build_autoencoder(input, y, wavelets, name, output_dim, nextMethod, reuse=True)
 
-def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False):
+def build_autoencoder(input, y, wavelets, name, output_dim, nextMethod, reuse=False):
     output = tf.split(1, SEQ_LENGTH, input)
+    orig_output = output
     output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+    sizes_down = [WAVELETS//2]
+    sizes_up = reversed(sizes_down)
+    for size in sizes_down:
+        output = [linear(output[i], size, name+'down'+str(size), reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
+        output = [tf.nn.tanh(o) for o in output]
     output = [linear(output[i], Z_SIZE, name+'downlast', reuse=reuse or i > 0)  for i in range(SEQ_LENGTH)]
     print("OUTPUT DIM IS", output_dim)
 
-    if nextMethod is not None:
-        output = nextMethod(output)
 
-    sizes_down = [WAVELETS//2]
-    sizes_up = reversed(sizes_down)
+    extra = [wnn_encode(tf.squeeze(orig_output[i]), Z_SIZE, name+'z', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+    if nextMethod is not None:
+        output = nextMethod([output, extra])
+
     for size in sizes_up:
         output = [linear(output[i], size, name+'up'+str(size), reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
         output = [tf.nn.tanh(o) for o in output]
@@ -222,7 +230,7 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
 def deep_autoencoder(output):
     name = 'l1'
     wavelets = WAVELETS
-    nonlinear = lambda output: [tf.nn.sigmoid(o) for o in output]
+    nonlinear = lambda output: [(tf.nn.sigmoid(o) *(tf.nn.tanh(o2))) for o,o2 in zip(output[0], output[1])]
     output_dim = int(output.get_shape()[3])
     output = build_autoencoder(output, wavelets, name, output_dim, nonlinear, reuse=False)
 
@@ -248,10 +256,10 @@ def create(x,y=None):
             return current_layer
         layer_index += 1
         layer_def = layers[layer_index]
-        return ops[layer_def['type']](current_layer, layer_def, nextMethod)
+        return ops[layer_def['type']](current_layer,layer_def, nextMethod)
 
     #flat_x = tf.reshape(x, [BATCH_SIZE, -1])
-    decoded = ops[layers[0]['type']](x, layers[0], nextMethod)
+    decoded = ops[layers[0]['type']](x,layers[0], nextMethod)
 
     #reconstructed_x = tf.reshape(output, [BATCH_SIZE, SEQ_LENGTH, CHANNELS,SIZE])
     results['decoded']=tf.reshape(decoded, [BATCH_SIZE, SEQ_LENGTH, CHANNELS,SIZE])
@@ -263,12 +271,12 @@ def create(x,y=None):
     d = get_entropy(results['decoded'])
     ys = get_entropy(y)
     #xent = 1/2*tf.abs(ys-d)+((-1)/2*tf.sign(d)*ys)+(tf.cast(-1/2*(tf.sign(d)*tf.sign(ys)) > 0, dtype=tf.float32))
-    xent = tf.square(ys-d)
-    results['cost']=tf.sqrt(tf.reduce_mean(xent))#+((-1)/2*tf.reduce_mean(tf.sign(d)*ys))
+    sqs = tf.square(ys-d)
+    results['cost']=2*tf.sqrt(tf.reduce_mean(sqs))# + tf.sqrt(tf.reduce_mean(sqs2))#+((-1)/2*tf.reduce_mean(tf.sign(d)*ys))
     results['pretrain_cost']=tf.sqrt(tf.reduce_mean(tf.square(autoencoded_x-x)))
     results['autoencoded_x']=autoencoded_x
     #results['cost']=results['cost']
-    #results['cost']=tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(xent, tf.zeros_like(ys)))
+    #results['cost']=tf.reduce_mean(1/tf.nn.sigmoid_cross_entropy_with_logits(tf.concat(1, dec_outputs), tf.concat(1, y_in_z)))
     #results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(reconstructed_x-x)))
     #results["cost"]= tf.sqrt(tf.reduce_mean(tf.square(y-results['decoded'])))
     return results
