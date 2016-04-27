@@ -130,15 +130,15 @@ def wnn_encode(input, wavelets, name, reuse=False):
         d_c = np.tile(d_c,BATCH_SIZE)
         translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
         dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
-        translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
-        dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
+        #translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
+        #dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
         w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
         #w = tf.ones([dim_in, wavelets])
         input_proj = tf.mul(tf.sub(tf.matmul(input, w), translation),dilation)
-        #killer = tf.greater(dilation, 0.01225)
-        #killer = tf.cast(killer, tf.float32)
-        return mother(input_proj)#*killer
+        killer = tf.greater(dilation, 0.0001225)
+        killer = tf.cast(killer, tf.float32)
+        return mother(input_proj)*killer
 
 
 def linear(input_, output_size, scope=None, stddev=0.2, bias_start=0.0, with_w=False, reuse=False):
@@ -164,7 +164,7 @@ def lstm(output):
     out_shape = output[0].get_shape()[1]
     memory = Z_SIZE
     cell = rnn_cell.BasicLSTMCell(memory)
-    cell = rnn_cell.MultiRNNCell([cell]*1)
+    cell = rnn_cell.MultiRNNCell([cell]*2)
     if(lstm_state == None):
         lstm_state = cell.zero_state(batch_size=BATCH_SIZE, dtype=tf.float32)
     #enc_inp = output
@@ -179,8 +179,7 @@ def lstm(output):
 
 
 def rnn_layer(output,layer_def, nextMethod):
-    output, extra = output
-    output = [e for o, e in zip(output,extra)]
+    output = [((o) +(o2)) for o,o2 in zip(output[0], output[1])]
     output = lstm(output)
 
     return output
@@ -190,6 +189,7 @@ def autoencoder(input, layer_def, nextMethod):
     name = layer_def['name']
     return build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=True)
 
+loss_term = 0
 def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False):
     output = tf.split(1, SEQ_LENGTH, input)
     orig_output = output
@@ -213,6 +213,10 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
 
     output = [linear(output[i], WAVELETS, name+'uplast', reuse=reuse or i > 0)  for i in range(SEQ_LENGTH)]
 
+    global loss_term
+    #loss_term = tf.concat(1, [phi-tf.minimum(tf.abs(o), phi) for o in output])
+    loss_term = [tf.maximum(0., -tf.log(o*5)) for o in output]
+    loss_term = [l * 10 for l in loss_term]
     output = [wnn_decode(output[i], output_dim, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
 
     output = [tf.reshape(o, [BATCH_SIZE, 1, CHANNELS, SIZE]) for o in output]
@@ -272,8 +276,10 @@ def create(x,y=None):
     ys = get_entropy(y)
     #xent = 1/2*tf.abs(ys-d)+((-1)/2*tf.sign(d)*ys)+(tf.cast(-1/2*(tf.sign(d)*tf.sign(ys)) > 0, dtype=tf.float32))
     sqs = tf.square(ys-d)
-    results['cost']=2*tf.sqrt(tf.reduce_mean(sqs))# + tf.sqrt(tf.reduce_mean(sqs2))#+((-1)/2*tf.reduce_mean(tf.sign(d)*ys))
-    results['pretrain_cost']=tf.sqrt(tf.reduce_mean(tf.square(autoencoded_x-x)))
+    global loss_term
+    print("LOSS TERM", loss_term)
+    results['cost']=2*tf.sqrt(tf.reduce_mean(sqs))+tf.add_n([tf.reduce_mean(lt) for lt in loss_term])# + tf.sqrt(tf.reduce_mean(sqs2))#+((-1)/2*tf.reduce_mean(tf.sign(d)*ys))
+    results['pretrain_cost']=tf.sqrt(tf.reduce_mean(tf.square(autoencoded_x-x)))+tf.add_n([tf.reduce_mean(lt) for lt in loss_term])
     results['autoencoded_x']=autoencoded_x
     #results['cost']=results['cost']
     #results['cost']=tf.reduce_mean(1/tf.nn.sigmoid_cross_entropy_with_logits(tf.concat(1, dec_outputs), tf.concat(1, y_in_z)))
@@ -340,7 +346,7 @@ def learn(filename, sess, train_step, x, y,k, autoencoder, saver):
         rate = wavobj['rate']
 
         input_squares = collect_input(transformed_raw, [SIZE*CHANNELS*SEQ_LENGTH])
-        y_squares = np.roll(input_squares, -SIZE)
+        y_squares = input_squares#np.roll(input_squares, -SIZE)
 
         i=0
         for square,y_square in zip(input_squares, y_squares):
@@ -433,10 +439,11 @@ def deep_gen():
             if(decoded is None):
                 decoded = batch# * 0.9 + np.random.uniform(-0.1, 0.1, batch.shape)
             else:
-                decoded = decoded * 0.1 + batch*0.8 + np.random.uniform(-0.1, 0.1, batch.shape)
+                decoded = batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
 
             #batch += np.random.uniform(-0.1,0.1,batch.shape)
-            decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
+            decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
+            #decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
             all_out.append(np.swapaxes(decoded, 2, 3))
         all_out = np.array(all_out)
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
@@ -448,7 +455,7 @@ def create_cost_optimizer(autoencoder):
         optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
         grad_clip = 5.
         tvars = tf.trainable_variables()
-        tvars = [var for var in tvars if 'RNN' in var.name]
+        #tvars = [var for var in tvars if 'RNN' in var.name]
         print("train trainables", [ v.name for v in tvars])
         grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder['cost'], tvars), grad_clip)
         train_step = optimizer.apply_gradients(zip(grads, tvars))
