@@ -19,18 +19,17 @@ import matplotlib.pyplot as plt
 
 
 
-PREDICT_ROLL=8
 TRAIN_REPEAT=100000
 SIZE=256
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
 BATCH_SIZE=256
-WAVELETS=512
-Z_SIZE=128#WAVELETS//4
+WAVELETS=256
+Z_SIZE=64#WAVELETS//4
 CHANNELS = 1
 SEQ_LENGTH = 4
 
 PLOT_EVERY = 50
-SAVE_EVERY = 200
+SAVE_EVERY = 500
 
 SAVE_DIR='save'
 #BATCH_SIZE=349
@@ -161,6 +160,7 @@ lstm_state = None
 lstm_dec_state = None
 def lstm(output):
     global lstm_state,lstm_dec_state
+    global x_hat
     out_shape = output[0].get_shape()[1]
     memory = Z_SIZE
     cell = rnn_cell.BasicLSTMCell(memory)
@@ -174,6 +174,7 @@ def lstm(output):
     print("dec_outputs  is", dec_outputs)
     dec_outputs = [linear(o, out_shape, 'RNN_dec_out'+str(i)) for i,o in enumerate(dec_outputs)]
     dec_outputs = [tf.nn.softmax(o) for o in dec_outputs]
+    x_hat = dec_outputs
     return dec_outputs
 
 
@@ -226,26 +227,33 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
     return output
 
 
-def deep_autoencoder(output):
+def deep_autoencoder(output, reuse=False):
     name = 'l1'
     wavelets = WAVELETS
-    nonlinear = lambda output: [tf.nn.softmax(tf.nn.sigmoid(o) *(tf.nn.tanh(o2))) for o,o2 in zip(output[0], output[1])]
+    z={}
+    def nonlinear(output):
+        output = [tf.nn.softmax(tf.nn.sigmoid(o) *(tf.nn.tanh(o2))) for o,o2 in zip(output[0], output[1])]
+        z['value'] = output
+        return output
     output_dim = int(output.get_shape()[3])
-    output = build_autoencoder(output, wavelets, name, output_dim, nonlinear, reuse=False)
+    output = build_autoencoder(output, wavelets, name, output_dim, nonlinear, reuse=reuse)
 
-    return output
+    return [output,z['value']]
 
 
 
 layer_index=0
 def create(x,y=None):
+    global x_hat
     if y is None:
         y = tf.ones_like(x)
     ops = {
         'autoencoder':autoencoder,
         'rnn':rnn_layer
     }
-    autoencoded_x = deep_autoencoder(x)
+    autoencoded_x, _ = deep_autoencoder(x)
+    _, y_hat = deep_autoencoder(y, reuse=True)
+
 
 
     results = {}
@@ -271,7 +279,11 @@ def create(x,y=None):
     ys = get_entropy(y)
     #xent = 1/2*tf.abs(ys-d)+((-1)/2*tf.sign(d)*ys)+(tf.cast(-1/2*(tf.sign(d)*tf.sign(ys)) > 0, dtype=tf.float32))
     sqs = tf.square(ys-d)
-    results['cost']=tf.reduce_sum(sqs)
+    #results['cost']=tf.reduce_sum(sqs)
+    #xent = tf.add_n([-xh*tf.log(yh)-(1-xh)*tf.log(1-yh) for xh, yh in zip(x_hat, y_hat)])
+    xent = tf.concat(1, [tf.square(yh-xh) for xh, yh in zip(x_hat, y_hat)])
+    results['cost']=tf.reduce_sum(xent)
+
     results['pretrain_cost']=tf.reduce_sum(tf.square(autoencoded_x-x))#+tf.reduce_mean(loss_term)
     results['autoencoded_x']=autoencoded_x
     #results['cost']=results['cost']
@@ -435,8 +447,8 @@ def deep_gen():
                 decoded = batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
 
             #batch += np.random.uniform(-0.1,0.1,batch.shape)
-            decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
-            #decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
+            #decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
+            decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
             all_out.append(np.swapaxes(decoded, 2, 3))
         all_out = np.array(all_out)
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
