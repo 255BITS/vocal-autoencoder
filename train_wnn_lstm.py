@@ -20,11 +20,11 @@ import matplotlib.pyplot as plt
 
 
 TRAIN_REPEAT=100000
-SIZE=256
+SIZE=2048
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
 BATCH_SIZE=256
-WAVELETS=256
-Z_SIZE=64#WAVELETS//4
+WAVELETS=1024
+Z_SIZE=256#WAVELETS//4
 CHANNELS = 1
 SEQ_LENGTH = 4
 
@@ -447,8 +447,8 @@ def deep_gen():
                 decoded = batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
 
             #batch += np.random.uniform(-0.1,0.1,batch.shape)
-            #decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
-            decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
+            decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
+            #decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
             all_out.append(np.swapaxes(decoded, 2, 3))
         all_out = np.array(all_out)
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
