@@ -8,29 +8,29 @@ import sys
 import os
 import glob
 
-from wav import loadfft2, savefft2, get_wav, save_wav
-
-
 from tensorflow.models.rnn import rnn_cell, rnn
 from tensorflow.models.rnn import seq2seq
 
 
 import matplotlib.pyplot as plt
 
+import trainer
+
 
 
 TRAIN_REPEAT=100000
-SIZE=8192*2 //4
+SIZE=8192
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
 BATCH_SIZE=128#512
-WAVELETS=256
-Z_SIZE=128#WAVELETS//4
+WAVELETS=1024
+Z_SIZE=512#WAVELETS//4
 CHANNELS = 1
 SEQ_LENGTH = 5
 
 PLOT_EVERY = 50
 SAVE_EVERY = 500
 
+PREDICT=1
 SAVE_DIR='save'
 #BATCH_SIZE=349
 layers = [
@@ -245,7 +245,7 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
     #    output = [linear(output[i], size, name+'down'+str(size), reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     #    output = [tf.nn.tanh(o) for o in output]
 
-    output = [tf.reshape(o, [BATCH_SIZE, 16,16,1]) for o in output]
+    output = [tf.reshape(o, [BATCH_SIZE, 64,16,1]) for o in output]
     output = [conv2d(output[i], 4,name=name+'conv1', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     output = [conv2d(output[i], 8,name=name+'conv2', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     output = [tf.reshape(o, [BATCH_SIZE, Z_SIZE]) for o in output]
@@ -257,9 +257,9 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
     if nextMethod is not None:
         output = nextMethod([output, extra])
 
-    output = [tf.reshape(o, [BATCH_SIZE, 4,4,8]) for o in output]
-    output = [deconv2d(output[i], [BATCH_SIZE, 8, 8, 4], name=name+'deconv1', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
-    output = [deconv2d(output[i], [BATCH_SIZE, 16, 16, 1], name=name+'deconv2', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+    output = [tf.reshape(o, [BATCH_SIZE, 16,4,8]) for o in output]
+    output = [deconv2d(output[i], [BATCH_SIZE, 32, 8, 4], name=name+'deconv1', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+    output = [deconv2d(output[i], [BATCH_SIZE, 64, 16, 1], name=name+'deconv2', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
     output = [tf.reshape(o, [BATCH_SIZE, WAVELETS]) for o in output]
     #for size in sizes_up:
     #    output = [linear(output[i], size, name+'up'+str(size), reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
@@ -353,118 +353,76 @@ def get_input():
 def get_y():
     return tf.placeholder("float", [BATCH_SIZE, SEQ_LENGTH, CHANNELS, SIZE], name='y')
 def deep_train(clobber=False):
-        sess = tf.Session()
+    sess = tf.Session()
 
-        x = get_input()
-        y = get_y()
-        autoencoder = create(x, y)
-        #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
-        train_step = create_cost_optimizer(autoencoder)
-        create_pretrain_cost_optimizer(autoencoder)
-        init = tf.initialize_all_variables()
-        sess.run(init)
-        saver = save_or_load(sess, clobber)
+    x = get_input()
+    y = get_y()
+    autoencoder = create(x, y)
+    #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
+    train_step = create_cost_optimizer(autoencoder)
+    create_pretrain_cost_optimizer(autoencoder)
+    init = tf.initialize_all_variables()
+    sess.run(init)
+    saver = save_or_load(sess, clobber)
 
-        tf.train.write_graph(sess.graph_def, 'log', 'modellstm3.pbtxt', False)
+    tf.train.write_graph(sess.graph_def, 'log', 'modellstm3.pbtxt', False)
 
-        #output = irfft(filtered)
-        i=0
-        j=0
-        #write('output.wav', rate, output)
-        for trains in range(TRAIN_REPEAT):
-            print("Starting epoch", trains)
-            for file in glob.glob('training/*.wav'):
-                i+=1
-                k = learn(file, sess, train_step, x,y,j, autoencoder, saver)
-                j+= k
-       
+    i=0
+    for epoch, batch, predict in trainer.each_batch('training/*.wav', \
+                size=SIZE*SEQ_LENGTH*CHANNELS, \
+                batch_size=BATCH_SIZE,
+                predict=PREDICT*SIZE,
+                epochs=TRAIN_REPEAT):
+        learn(batch, predict, sess, train_step, x,y,i, autoencoder, saver)
+        i=i+1
 
-def collect_input(data, dims, pad=False):
-    # discard extra info
+def learn(batch, predict, sess, train_step, x, y,k, autoencoder, saver):
+    batch = np.reshape(batch, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
+    batch = np.swapaxes(batch, 2, 3)
+    predict = np.reshape(predict, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
+    predict = np.swapaxes(predict, 2, 3)
+    _, cost, decoded = sess.run([train_step,autoencoder['cost'], autoencoder['decoded']], feed_dict={x: batch, y:predict})
+    if((k) % PLOT_EVERY == 3):
+        to_plot = np.reshape(predict[0,0,0,:], [-1])
+        plt.clf()
+        plt.plot(to_plot)
 
-    if(pad and len(data) < dims[0]*BATCH_SIZE*SEQ_LENGTH):
-        zeros=np.zeros(dims[0]*BATCH_SIZE*SEQ_LENGTH)
-        zeros[:len(data)]= data
-        print(np.array(zeros))
-        data = zeros
-    length = len(data)
-    arr= np.array(data[0:int(length/dims[0]/BATCH_SIZE/SEQ_LENGTH)*dims[0]*BATCH_SIZE*SEQ_LENGTH])
-    print(np.shape(arr), "SHAPE")
+        plt.xlim([0, SIZE])
+        plt.ylim([-2, 2])
+        plt.ylabel("Amplitude")
+        plt.xlabel("Time")
+        ## set the title  
+        plt.title("batch")
+        plt.plot(np.reshape(decoded[0,0,0,:], [-1]))
+        plt.savefig('visualize/input-'+str(k)+'.png')
+    if((k)%SAVE_EVERY==99):
+        print("Saving")
+        saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=k+1)
 
-    
-    reshaped =  arr.reshape((-1, BATCH_SIZE, dims[0]))
-    return reshaped
+    print(" cost", cost, k)
 
-def learn(filename, sess, train_step, x, y,k, autoencoder, saver):
-
-        wavobj = get_wav(filename)
-        transformed_raw = wavobj['data']
-        rate = wavobj['rate']
-
-        input_squares = collect_input(transformed_raw, [SIZE*CHANNELS*SEQ_LENGTH])
-        MAX_INPUT_SQUARES=200
-        input_squares = input_squares[:MAX_INPUT_SQUARES]
-        y_squares = np.roll(input_squares, -SIZE*2)
-
-        i=0
-        for square,y_square in zip(input_squares, y_squares):
-            square = np.reshape(square, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
-            square = np.swapaxes(square, 2, 3)
-            y_square = np.reshape(y_square, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
-            y_square = np.swapaxes(y_square, 2, 3)
-            _, cost, decoded = sess.run([train_step,autoencoder['cost'], autoencoder['decoded']], feed_dict={x: square, y:y_square})
-            i+=1
-            if((i+k) % PLOT_EVERY == 3):
-                to_plot = np.reshape(y_square[0,0,0,:], [-1])
-                plt.clf()
-                plt.plot(to_plot)
-
-                plt.xlim([0, SIZE])
-                plt.ylim([-2, 2])
-                plt.ylabel("Amplitude")
-                plt.xlabel("Time")
-                ## set the title  
-                plt.title("batch")
-                plt.plot(np.reshape(decoded[0,0,0,:], [-1]))
-                plt.savefig('visualize/input-'+str(k+i)+'.png')
-            if((i+k)%SAVE_EVERY==1):
-                print("Saving")
-                saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
+def pretrain_learn(batch, predict, sess, train_step, x, y,k, autoencoder, saver):
+    batch = np.reshape(batch, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
+    batch = np.swapaxes(batch, 2, 3)
  
-            print(" cost", cost, k+i, filename )
-        return i
+    _, cost, decoded  = sess.run([train_step,autoencoder['pretrain_cost'], autoencoder['autoencoded_x']], feed_dict={x: batch})
+    if((k) % PLOT_EVERY == 3):
+        to_plot = np.reshape(decoded[0,0,0,:], [-1])
+        plt.clf()
+        plt.plot(to_plot)
 
-def pretrain_learn(filename, sess, train_step, x, y,k, autoencoder, saver):
-        wavobj = get_wav(filename)
-        transformed_raw = wavobj['data']
-        rate = wavobj['rate']
+        plt.xlim([0, SIZE])
+        plt.ylim([-2, 2])
+        plt.ylabel("Amplitude")
+        plt.xlabel("Time")
+        plt.title("batch")
+        plt.plot(np.reshape(decoded[0,0,0,:], [-1]))
+        plt.savefig('visualize/input-'+str(k)+'.png')
+    if((k)%SAVE_EVERY==99):
+        print("Saving")
+        saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=k+1)
 
-        input_squares = collect_input(transformed_raw, [SIZE*CHANNELS*SEQ_LENGTH])
-
-        i=0
-        for square in input_squares:
-            square = np.reshape(square, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
-            square = np.swapaxes(square, 2, 3)
-            _, cost, decoded  = sess.run([train_step,autoencoder['pretrain_cost'], autoencoder['autoencoded_x']], feed_dict={x: square})
-            i+=1
-            if((i+k) % PLOT_EVERY == 3):
-                to_plot = np.reshape(square[0,0,0,:], [-1])
-                plt.clf()
-                plt.plot(to_plot)
-
-                plt.xlim([0, SIZE])
-                plt.ylim([-2, 2])
-                plt.ylabel("Amplitude")
-                plt.xlabel("Time")
-                plt.title("batch")
-                plt.plot(np.reshape(decoded[0,0,0,:], [-1]))
-                plt.savefig('visualize/input-'+str(k+i)+'.png')
-            if((i+k)%SAVE_EVERY==1):
-                print("Saving")
-                saver.save(sess, SAVE_DIR+"/modellstm3.ckpt", global_step=i+1)
- 
-            print(" cost", cost, k+i, filename )
-        return i
+    print(" cost", cost, k )
 
 
 def deep_gen():
@@ -497,11 +455,11 @@ def deep_gen():
             if(decoded is None):
                 decoded = batch# * 0.9 + np.random.uniform(-0.1, 0.1, batch.shape)
             else:
-                decoded = batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
+                decoded = decoded#batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
 
             #batch += np.random.uniform(-0.1,0.1,batch.shape)
-            decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
-            #decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
+            #decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
+            decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
             all_out.append(np.swapaxes(decoded, 2, 3))
         all_out = np.array(all_out)
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
@@ -542,22 +500,22 @@ def deep_pretrain(clobber=False):
 
         tf.train.write_graph(sess.graph_def, 'log', 'modellstm3.pbtxt', False)
 
-        #output = irfft(filtered)
         i=0
-        j=0
-        #write('output.wav', rate, output)
-        for trains in range(TRAIN_REPEAT):
-            print("Starting epoch", trains)
-            for file in glob.glob('training/*.wav'):
-                i+=1
-                k = pretrain_learn(file, sess, train_step, x,None,j, autoencoder, saver)
-                j+= k
- 
+
+        for epoch, batch, predict in trainer.each_batch('training/*.wav', \
+                    size=SIZE*SEQ_LENGTH*CHANNELS, \
+                    batch_size=BATCH_SIZE,
+                    predict=PREDICT*SIZE,
+                    epochs=TRAIN_REPEAT):
+
+            pretrain_learn(batch, predict, sess, train_step, x,None, i, autoencoder, saver)
+            i=i+1
+
 def save_or_load(sess, clobber):
     if(clobber):
-        print("Saving ...")
+        print("Clobbering ...")
         saver = tf.train.Saver(tf.all_variables())
-        saver.save(sess, SAVE_DIR+'/modellstm3.ckpt', global_step=0)
+        #saver.save(sess, SAVE_DIR+'/modellstm3.ckpt', global_step=0)
     else:
         print("Loading ...")
         saver = tf.train.Saver()
