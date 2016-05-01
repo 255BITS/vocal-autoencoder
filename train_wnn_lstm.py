@@ -15,6 +15,7 @@ from tensorflow.models.rnn import seq2seq
 import matplotlib.pyplot as plt
 
 import trainer
+from wav import get_wav, save_wav
 
 
 
