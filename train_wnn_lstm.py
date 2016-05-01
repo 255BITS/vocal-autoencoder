@@ -407,7 +407,7 @@ def pretrain_learn(batch, predict, sess, train_step, x, y,k, autoencoder, saver)
  
     _, cost, decoded  = sess.run([train_step,autoencoder['pretrain_cost'], autoencoder['autoencoded_x']], feed_dict={x: batch})
     if((k) % PLOT_EVERY == 3):
-        to_plot = np.reshape(decoded[0,0,0,:], [-1])
+        to_plot = np.reshape(batch[0,0,0,:], [-1])
         plt.clf()
         plt.plot(to_plot)
 
@@ -427,11 +427,6 @@ def pretrain_learn(batch, predict, sess, train_step, x, y,k, autoencoder, saver)
 
 def deep_gen():
     with tf.Session() as sess:
-        wavobj = get_wav('input.wav')
-        transformed = wavobj['data']
-        save_wav(wavobj, 'sanity.wav')
-        batches = collect_input(transformed, [SIZE*CHANNELS*SEQ_LENGTH], pad=True)
-
         x = get_input()
         autoencoder = create(x)
         init = tf.initialize_all_variables()
@@ -446,22 +441,31 @@ def deep_gen():
 
 
 
-
+        i=0
         all_out=[]
-        decoded = None
-        for batch in batches:
-            batch = np.reshape(batch, [BATCH_SIZE, SEQ_LENGTH, SIZE, CHANNELS])
-            batch =np.swapaxes(batch, 2, 3)
-            if(decoded is None):
-                decoded = batch# * 0.9 + np.random.uniform(-0.1, 0.1, batch.shape)
-            else:
-                decoded = decoded#batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
+        for epoch, batch, predict in trainer.each_batch('input.wav', \
+                    size=SIZE*SEQ_LENGTH*CHANNELS, \
+                    batch_size=BATCH_SIZE,
+                    predict=PREDICT*SIZE,
+                    epochs=1):
 
-            #batch += np.random.uniform(-0.1,0.1,batch.shape)
-            #decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
-            decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
-            all_out.append(np.swapaxes(decoded, 2, 3))
+            if(i>0):
+                print("Not doing anything")
+            else:
+                decoded = None
+                batch = np.reshape(batch, [BATCH_SIZE, SEQ_LENGTH, SIZE, CHANNELS])
+                batch =np.swapaxes(batch, 2, 3)
+                if(decoded is None):
+                    decoded = batch# * 0.9 + np.random.uniform(-0.1, 0.1, batch.shape)
+                else:
+                    decoded = decoded#batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
+
+                #batch += np.random.uniform(-0.1,0.1,batch.shape)
+                #decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
+                decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
+                all_out.append(np.swapaxes(decoded, 2, 3))
         all_out = np.array(all_out)
+        wavobj = get_wav('input.wav')
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
         print(all_out)
         print('saving to output2.wav', np.min(all_out), np.max(all_out))
