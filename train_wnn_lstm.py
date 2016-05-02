@@ -20,18 +20,18 @@ from wav import get_wav, save_wav
 
 
 TRAIN_REPEAT=100000
-SIZE=8192
+SIZE=4096
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
-BATCH_SIZE=128#512
-WAVELETS=1024
-Z_SIZE=512#WAVELETS//4
+BATCH_SIZE=64
+WAVELETS=2048
+Z_SIZE=1024#WAVELETS//4
 CHANNELS = 1
 SEQ_LENGTH = 5
 
 PLOT_EVERY = 50
 SAVE_EVERY = 200
 
-PREDICT=1
+PREDICT=SIZE*3//2
 SAVE_DIR='save'
 #BATCH_SIZE=349
 layers = [
@@ -225,7 +225,7 @@ def lstm(output):
 
 def rnn_layer(output,layer_def, nextMethod):
     #output = [((o)) for o,o2 in zip(output[0], output[1])]
-    output = [o *(tf.nn.sigmoid(o2)) for o,o2 in zip(output[0], output[1])]
+    output = [tf.nn.tanh(o) *(tf.nn.sigmoid(o2)) for o,o2 in zip(output[0], output[1])]
     output = lstm(output)
 
     return output
@@ -240,17 +240,10 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
     output = tf.split(1, SEQ_LENGTH, input)
     orig_output = output
     output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
-    sizes_down = [WAVELETS//2]
-    sizes_up = reversed(sizes_down)
-    #for size in sizes_down:
-    #    output = [linear(output[i], size, name+'down'+str(size), reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
-    #    output = [tf.nn.tanh(o) for o in output]
-
-    output = [tf.reshape(o, [BATCH_SIZE, 64,16,1]) for o in output]
+    output = [tf.reshape(o, [BATCH_SIZE, 128,16,1]) for o in output]
     output = [conv2d(output[i], 4,name=name+'conv1', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     output = [conv2d(output[i], 8,name=name+'conv2', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     output = [tf.reshape(o, [BATCH_SIZE, Z_SIZE]) for o in output]
-    #output = [linear(output[i], Z_SIZE, name+'downlast', reuse=reuse or i > 0)  for i in range(SEQ_LENGTH)]
     print("OUTPUT DIM IS", output_dim)
 
 
@@ -258,15 +251,11 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
     if nextMethod is not None:
         output = nextMethod([output, extra])
 
-    output = [tf.reshape(o, [BATCH_SIZE, 16,4,8]) for o in output]
-    output = [deconv2d(output[i], [BATCH_SIZE, 32, 8, 4], name=name+'deconv1', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
-    output = [deconv2d(output[i], [BATCH_SIZE, 64, 16, 1], name=name+'deconv2', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+    output = [tf.reshape(o, [BATCH_SIZE, 32,4,8]) for o in output]
+    output = [deconv2d(output[i], [BATCH_SIZE, 64, 8, 4], name=name+'deconv1', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+    output = [deconv2d(output[i], [BATCH_SIZE, 128, 16, 1], name=name+'deconv2', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
     output = [tf.reshape(o, [BATCH_SIZE, WAVELETS]) for o in output]
-    #for size in sizes_up:
-    #    output = [linear(output[i], size, name+'up'+str(size), reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
-    #    output = [tf.nn.tanh(o) for o in output]
 
-    #output = [linear(output[i], WAVELETS, name+'uplast', reuse=reuse or i > 0)  for i in range(SEQ_LENGTH)]
     output = [wnn_decode(output[i], output_dim, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
 
     output = [tf.reshape(o, [BATCH_SIZE, 1, CHANNELS, SIZE]) for o in output]
@@ -287,8 +276,8 @@ def deep_autoencoder(output, reuse=False):
     wavelets = WAVELETS
     z={}
     def nonlinear(output):
-        output = [o *(tf.nn.sigmoid(o2) )for o,o2 in zip(output[0], output[1])]
-        #output = [tf.nn.dropout(o, 0.7) for o in output]
+        output = [tf.nn.tanh(o) *(tf.nn.sigmoid(o2) )for o,o2 in zip(output[0], output[1])]
+        output = [tf.nn.dropout(o, 0.8) for o in output]
         z['value'] = output
         return output
     output_dim = int(output.get_shape()[3])
@@ -340,7 +329,7 @@ def create(x,y=None):
     #xent = tf.concat(1, [tf.square(yh-xh) for xh, yh in zip(x_hat, y_hat)])
     #results['cost']=tf.reduce_sum(xent)
 
-    results['pretrain_cost']=tf.sqrt(tf.reduce_sum(tf.square(autoencoded_x-x)))#+tf.reduce_mean(loss_term)
+    results['pretrain_cost']=tf.sqrt(tf.reduce_sum(tf.square(x-autoencoded_x)))#+tf.reduce_mean(loss_term)
     results['autoencoded_x']=autoencoded_x
     #results['cost']=results['cost']
     #results['cost']=tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(tf.concat(1, x_hat*10), tf.concat(1, y_hat*10)))
