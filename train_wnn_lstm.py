@@ -20,10 +20,10 @@ from wav import get_wav, save_wav
 
 
 TRAIN_REPEAT=100000
-SIZE=1024
+SIZE=8192
 LEARNING_RATE = tf.Variable(2e-3, trainable=False)
 BATCH_SIZE=256
-WAVELETS=512
+WAVELETS=1024
 Z_SIZE=128#WAVELETS//4
 CHANNELS = 1
 SEQ_LENGTH = 1
@@ -240,15 +240,14 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
     output = tf.split(1, SEQ_LENGTH, input)
     output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
     orig_output = output
-    output = [linear(o,64*32,name+'conv_in', reuse=reuse,stddev=0.5) for o in output]
-    output = [tf.reshape(o, [BATCH_SIZE, 64,32,1]) for o in output]
+    output = [tf.reshape(o, [BATCH_SIZE, 32,32,1]) for o in output]
     output = [conv2d(output[i], 16,name=name+'conv1', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     output = [tf.nn.tanh(o) for o in output]
     output = [conv2d(output[i], 32,name=name+'conv2', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     output = [tf.nn.tanh(o) for o in output]
     output = [conv2d(output[i], 64,name=name+'conv3', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     output = [tf.reshape(o, [BATCH_SIZE, -1]) for o in output]
-    output = [linear(o,Z_SIZE,name+'lin_conv_out', reuse=reuse,stddev=0.5) for o in output]
+    output = [linear(output[i], Z_SIZE, name=name+'convlin', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     print("OUTPUT DIM IS", output_dim)
 
 
@@ -313,17 +312,17 @@ def discriminator(output, reuse=True):
     name='discriminator'
     output = tf.split(1, SEQ_LENGTH, output)
     output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, 'l1', reuse = True) for i in range(SEQ_LENGTH)]
-    #output = [linear(o,64*32,name+'d_in', reuse=reuse,stddev=0.5) for o in output]
-    #output = [tf.reshape(o, [BATCH_SIZE, 64,32,1]) for o in output]
-    #output = [conv2d(output[i], 8,name=name+'conv1', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
-    #output = [tf.nn.relu(o) for o in output]
-    #output = [conv2d(output[i], 16,name=name+'conv2', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
-    #output = [tf.nn.relu(o) for o in output]
-    #output = [conv2d(output[i], 32,name=name+'conv3', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
-    #output = [tf.nn.relu(o) for o in output]
+    output = [linear(o,64*32,name+'d_in', reuse=reuse,stddev=0.5) for o in output]
+    output = [tf.reshape(o, [BATCH_SIZE, 64,32,1]) for o in output]
+    output = [conv2d(output[i], 8,name=name+'conv1', stddev=0.03, reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
+    output = [tf.nn.relu(o) for o in output]
+    output = [conv2d(output[i], 16,name=name+'conv2', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
+    output = [tf.nn.relu(o) for o in output]
+    output = [conv2d(output[i], 32,name=name+'conv3', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
+    output = [tf.nn.relu(o) for o in output]
     output = [tf.reshape(o, [BATCH_SIZE, -1]) for o in output]
     output = tf.concat(1, output)
-    output = linear(output, 1,name=name+'linear1', reuse=reuse)
+    output = linear(output, 1,name=name+'linear1', reuse=reuse, stddev=0.01)
     print('SHAPE is', output.get_shape())
     return tf.sigmoid(output)
  
@@ -439,9 +438,9 @@ def pretrain_learn(batch, predict, sess, train_step, g_train_step, ac_train_step
     batch = np.reshape(batch, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
     batch = np.swapaxes(batch, 2, 3)
  
-    _, cost, decoded = sess.run([train_step,autoencoder['pretrain_cost'], autoencoder['autoencoded_x']], feed_dict={x: batch})
+    #_, cost, decoded = sess.run([train_step,autoencoder['pretrain_cost'], autoencoder['autoencoded_x']], feed_dict={x: batch})
+    _, cost, decoded, d_loss, d_fake_loss = sess.run([ac_train_step,autoencoder['pretrain_cost'], autoencoder['autoencoded_x'],autoencoder['d_loss'], autoencoder['fake_loss']], feed_dict={x: batch})
     _, g_loss, g_sample = sess.run([g_train_step,autoencoder['g_loss'], autoencoder['g_sample']], feed_dict={x: batch})
-    _, d_loss, d_fake_loss = sess.run([ac_train_step,autoencoder['d_loss'], autoencoder['fake_loss']], feed_dict={x: batch})
     if((k) % PLOT_EVERY == 3):
         to_plot = np.reshape(batch[0,0,0,:], [-1])
         plt.clf()
@@ -553,7 +552,7 @@ def deep_pretrain(clobber=False):
             return train_step
 
         g_train_step = create_optim('g_loss', LEARNING_RATE/20)
-        ac_train_step = create_optim('adversarial_cost', LEARNING_RATE/20)
+        ac_train_step = create_optim('joint_loss', LEARNING_RATE)
 
 
 
