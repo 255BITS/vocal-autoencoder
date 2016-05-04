@@ -225,10 +225,10 @@ def lstm(output):
 
 def rnn_layer(output,layer_def, nextMethod):
     #output = [((o)) for o,o2 in zip(output[0], output[1])]
-    #output = [tf.nn.tanh(o) *(tf.nn.sigmoid(o2)) for o,o2 in zip(output[0], output[1])]
-    #output = lstm(output)
+    output = [tf.nn.tanh(o) *(tf.nn.sigmoid(o2)) for o,o2 in zip(output[0], output[1])]
+    output = lstm(output)
 
-    return output[0]
+    return output
 def autoencoder(input, layer_def, nextMethod):
     output_dim = int(input.get_shape()[3])
     wavelets = layer_def['wavelets']
