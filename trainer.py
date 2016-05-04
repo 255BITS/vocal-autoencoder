@@ -23,9 +23,6 @@ def load(files, batch_size, size, predict):
     p.start()
 
 def get_batch(file, batch_size, size):
-
-    print("Loading", file)
-
     out = get_wav(file)
     out = np.reshape(out['data'], [-1])
     end = (len(out)//batch_size//size)*size*batch_size
