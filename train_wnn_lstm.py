@@ -490,6 +490,7 @@ def deep_gen():
         i=0
         g_all_out=[]
         all_out=[]
+        rnn_out=[]
         for epoch, batch, predict in trainer.each_batch('input.wav', \
                     size=SIZE*SEQ_LENGTH*CHANNELS, \
                     batch_size=BATCH_SIZE,
@@ -510,11 +511,13 @@ def deep_gen():
                 #batch += np.random.uniform(-0.1,0.1,batch.shape)
                 decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
                 g_sample = sess.run(autoencoder['g_sample'], feed_dict={x: decoded})
-                #decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
+                rnn_sample = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
                 all_out.append(np.swapaxes(decoded, 2, 3))
                 g_all_out.append(np.swapaxes(g_sample, 2, 3))
+                rnn_out.append(np.swapaxes(rnn_sample, 2, 3))
         all_out = np.array(all_out)
         g_all_out = np.array(g_all_out)
+        rnn_out = np.array(rnn_out)
         wavobj = get_wav('input.wav')
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
         print(all_out)
@@ -522,6 +525,8 @@ def deep_gen():
         save_wav(wavobj, 'output2.wav')
         wavobj['data']=np.reshape(g_all_out, [-1, CHANNELS])
         save_wav(wavobj,'g_output2.wav')
+        wavobj['data']=np.reshape(rnn_out, [-1, CHANNELS])
+        save_wav(wavobj,'rnn_output2.wav')
 
 def create_cost_optimizer(autoencoder):
         optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
