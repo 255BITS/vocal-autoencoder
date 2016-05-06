@@ -21,17 +21,18 @@ from wav import get_wav, save_wav
 
 TRAIN_REPEAT=100000
 SIZE=1024
-LEARNING_RATE = tf.Variable(2e-3, trainable=False)
-BATCH_SIZE=256
+LEARNING_RATE = tf.Variable(2.55 * 1e-3, trainable=False)
+LEARNING_RATE_G_LOSS = LEARNING_RATE/10
+BATCH_SIZE=512
 WAVELETS=512
 Z_SIZE=128#WAVELETS//4
 CHANNELS = 1
-SEQ_LENGTH = 1
+SEQ_LENGTH = 2
 
 PLOT_EVERY = 50
 SAVE_EVERY = 1000
 
-PREDICT=SIZE*3//2
+PREDICT=SEQ_LENGTH
 SAVE_DIR='save'
 #BATCH_SIZE=349
 layers = [
@@ -122,7 +123,7 @@ def wnn_encode(input, wavelets, name, reuse=False):
             tf.get_variable_scope().reuse_variables()
         full_resolutions = math.log(wavelets*2)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
-        d_c = [(leaf[1]) for leaf in tree]
+        d_c = [(leaf[1])*64 for leaf in tree]
         d_c.append(0.01)
         t_c = [leaf[0] for leaf in tree]
         t_c.append(0.01)
@@ -130,13 +131,13 @@ def wnn_encode(input, wavelets, name, reuse=False):
         d_c = np.tile(d_c,BATCH_SIZE)
         translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
         dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
-        translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
-        dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
+        #translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
+        #dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
         w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
         #w = tf.ones([dim_in, wavelets])
         input_proj = tf.mul(tf.sub(tf.matmul(input, w), translation),dilation)
-        #killer = tf.greater(dilation, 0.001225)
+        #killer = tf.greater(dilation, 0.02551225)
         #killer = tf.cast(killer, tf.float32)
         return mother(input_proj)#*killer
 
@@ -189,7 +190,7 @@ def deconv2d(input_, output_shape,
 
 
 def conv2d(input_, output_dim, 
-        k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.02, padding='SAME',
+        k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.2, padding='SAME',
         name="conv2d", reuse=False):
     with tf.variable_scope(name):
         if(reuse):
@@ -205,16 +206,16 @@ def conv2d(input_, output_dim,
 
 
 def lstm(output):
-    global x_hat
+    global x_hat, y_hat
     out_shape = output[0].get_shape()[1]
     memory = Z_SIZE
     cell = rnn_cell.BasicLSTMCell(memory)
-    cell = rnn_cell.MultiRNNCell([cell]*2)
+    cell = rnn_cell.MultiRNNCell([cell]*4)
     lstm_state = cell.zero_state(batch_size=BATCH_SIZE, dtype=tf.float32)
-    #enc_inp = output
-    #dec_inp = [tf.zeros_like(enc_inp[0], name="GO")]+ enc_inp[:-1]
-    #dec_outputs, dec_state = seq2seq.basic_rnn_seq2seq(enc_inp, dec_inp, cell)
-    dec_outputs, lstm_dec_state = rnn.rnn(cell, output,initial_state=lstm_state, dtype=tf.float32)
+    enc_inp = output
+    dec_inp = [tf.zeros_like(enc_inp[0], name="GO")]+ y_hat
+    dec_outputs, dec_state = seq2seq.basic_rnn_seq2seq(enc_inp, dec_inp, cell)
+    #dec_outputs, lstm_dec_state = rnn.rnn(cell, output,initial_state=lstm_state, dtype=tf.float32)
     print("dec_outputs  is", dec_outputs)
     #dec_outputs = [linear(o, out_shape, 'RNN_dec_out'+str(i)) for i,o in enumerate(dec_outputs)]
     #dec_outputs = [tf.nn.sigmoid(o) for o in dec_outputs]
@@ -225,7 +226,7 @@ def lstm(output):
 
 def rnn_layer(output,layer_def, nextMethod):
     #output = [((o)) for o,o2 in zip(output[0], output[1])]
-    output = [tf.nn.tanh(o) *(tf.nn.sigmoid(o2)) for o,o2 in zip(output[0], output[1])]
+    output = [(tf.nn.tanh(o)*tf.nn.sigmoid(o2)) for o,o2 in zip(output[0], output[1])]
     output = lstm(output)
 
     return output
@@ -247,7 +248,7 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
     #output = [tf.nn.dropout(o, 0.9) for o in output]
     output = [conv2d(output[i], 32,name=name+'conv2', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
     output = [tf.nn.relu(o) for o in output]
-    output = [conv2d(output[i], 16,k_w=3, k_h=3, name=name+'conv3', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
+    output = [conv2d(output[i], 16,k_w=4, k_h=4, name=name+'conv3', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
 
 
     #output = [tf.reshape(o, [BATCH_SIZE, -1]) for o in output]
@@ -329,7 +330,7 @@ def discriminator(output, reuse=True):
 
 layer_index=0
 def create(x,y=None):
-    global x_hat
+    global x_hat, y_hat
     if y is None:
         y = tf.ones_like(x)
     ops = {
@@ -365,7 +366,9 @@ def create(x,y=None):
 
     results['pretrain_cost']=tf.sqrt(tf.reduce_sum(tf.square(x-autoencoded_x)))#+tf.reduce_mean(loss_term)
 
-    gen = build_generator([tf.random_uniform([BATCH_SIZE, Z_SIZE],-1, 1) for i in range(SEQ_LENGTH)], reuse=True)
+    gen = build_generator([tf.nn.tanh(tf.random_normal([BATCH_SIZE, Z_SIZE], mean=0, stddev=0.5)* \
+        tf.nn.sigmoid(tf.random_uniform([BATCH_SIZE,Z_SIZE],-6, 6))) \
+            for i in range(SEQ_LENGTH)], reuse=True)
     real_d = discriminator(x, reuse=False)
     fake_d = discriminator(gen, reuse=True)
     # from https://arxiv.org/pdf/1604.07379v1.pdf
@@ -394,6 +397,8 @@ def deep_train(clobber=False):
     #train_step = tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(autoencoder['cost'])
     train_step = create_cost_optimizer(autoencoder)
     create_pretrain_cost_optimizer(autoencoder)
+    g_train_step = create_optim(autoencoder, 'g_loss', LEARNING_RATE_G_LOSS)
+    ac_train_step = create_optim(autoencoder, 'joint_loss', LEARNING_RATE)
     init = tf.initialize_all_variables()
     sess.run(init)
     saver = save_or_load(sess, clobber)
@@ -490,7 +495,7 @@ def deep_gen():
         i=0
         g_all_out=[]
         all_out=[]
-        rnn_out=[]
+        decoded_all_out=[]
         for epoch, batch, predict in trainer.each_batch('input.wav', \
                     size=SIZE*SEQ_LENGTH*CHANNELS, \
                     batch_size=BATCH_SIZE,
@@ -511,10 +516,10 @@ def deep_gen():
                 #batch += np.random.uniform(-0.1,0.1,batch.shape)
                 decoded = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded})
                 g_sample = sess.run(autoencoder['g_sample'], feed_dict={x: decoded})
-                rnn_sample = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
                 all_out.append(np.swapaxes(decoded, 2, 3))
                 g_all_out.append(np.swapaxes(g_sample, 2, 3))
-                rnn_out.append(np.swapaxes(rnn_sample, 2, 3))
+                decoded = sess.run(autoencoder['decoded'], feed_dict={x: decoded})
+                decoded_all_out.append(np.swapaxes(decoded, 2, 3))
         all_out = np.array(all_out)
         g_all_out = np.array(g_all_out)
         rnn_out = np.array(rnn_out)
@@ -525,8 +530,8 @@ def deep_gen():
         save_wav(wavobj, 'output2.wav')
         wavobj['data']=np.reshape(g_all_out, [-1, CHANNELS])
         save_wav(wavobj,'g_output2.wav')
-        wavobj['data']=np.reshape(rnn_out, [-1, CHANNELS])
-        save_wav(wavobj,'rnn_output2.wav')
+        wavobj['data']=np.reshape(decoded_all_out, [-1, CHANNELS])
+        save_wav(wavobj,'decoded_output.wav')
 
 def create_cost_optimizer(autoencoder):
         optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
@@ -547,6 +552,17 @@ def create_pretrain_cost_optimizer(autoencoder):
         train_step = optimizer.apply_gradients(zip(grads, tvars))
         return train_step
 
+def create_optim(autoencoder, name, learning_rate):
+    optimizer = tf.train.AdamOptimizer(learning_rate)
+    grad_clip = 5.
+    tvars = tf.trainable_variables()
+    #tvars = [var for var in tvars if 'l1' in var.name]
+    print("Pretrain trainables", [ v.name for v in tvars])
+    grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder[name], tvars), grad_clip)
+    train_step = optimizer.apply_gradients(zip(grads, tvars))
+    return train_step
+
+
 
 def deep_pretrain(clobber=False):
         sess = tf.Session()
@@ -555,18 +571,8 @@ def deep_pretrain(clobber=False):
         autoencoder = create(x)
         create_cost_optimizer(autoencoder)
         train_step = create_pretrain_cost_optimizer(autoencoder)
-        def create_optim(name, learning_rate):
-            optimizer = tf.train.AdamOptimizer(learning_rate)
-            grad_clip = 5.
-            tvars = tf.trainable_variables()
-            #tvars = [var for var in tvars if 'l1' in var.name]
-            print("Pretrain trainables", [ v.name for v in tvars])
-            grads, _ = tf.clip_by_global_norm(tf.gradients(autoencoder[name], tvars), grad_clip)
-            train_step = optimizer.apply_gradients(zip(grads, tvars))
-            return train_step
-
-        g_train_step = create_optim('g_loss', LEARNING_RATE/10)
-        ac_train_step = create_optim('joint_loss', LEARNING_RATE)
+        g_train_step = create_optim(autoencoder, 'g_loss', LEARNING_RATE_G_LOSS)
+        ac_train_step = create_optim(autoencoder, 'joint_loss', LEARNING_RATE)
 
 
 
