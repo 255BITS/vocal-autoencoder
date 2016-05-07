@@ -210,7 +210,7 @@ def lstm(output):
     global x_hat, y_hat
     memory = Z_SIZE
     cell = rnn_cell.BasicLSTMCell(memory)
-    cell = rnn_cell.MultiRNNCell([cell]*4)
+    cell = rnn_cell.MultiRNNCell([cell]*2)
     lstm_state = cell.zero_state(batch_size=BATCH_SIZE, dtype=tf.float32)
     output = tf.reshape(output, [BATCH_SIZE, SEQ_LENGTH, Z_SIZE])
     output = tf.split(1, SEQ_LENGTH, output)
@@ -322,9 +322,9 @@ def discriminator(output, reuse=True):
     output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, SIZE*CHANNELS])
     output = wnn_encode(output, WAVELETS, 'l1', reuse = True)
     output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, 32,16,1])
-    output = conv2d(output, 32,name=name+'conv1', reuse=reuse)
+    output = conv2d(output, 24,name=name+'conv1', reuse=reuse)
     output = tf.nn.relu(output)
-    output = conv2d(output, 16,name=name+'conv3', reuse=reuse)
+    output = conv2d(output, 12,name=name+'conv3', reuse=reuse)
     output = tf.nn.relu(output)
     output = tf.reshape(output, [BATCH_SIZE, -1])
     output = linear(output, 1,name=name+'linear1', reuse=reuse, stddev=0.01)
