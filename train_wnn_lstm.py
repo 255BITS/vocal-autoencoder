@@ -127,10 +127,8 @@ def wnn_encode(input, wavelets, name, reuse=False):
         d_c.append(0.01)
         t_c = [leaf[0] for leaf in tree]
         t_c.append(0.01)
-        t_c = np.tile(t_c,BATCH_SIZE)
-        d_c = np.tile(d_c,BATCH_SIZE)
-        translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
-        dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
+        translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [wavelets])
+        dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [wavelets])
         #translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         #dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
@@ -210,18 +208,28 @@ def conv2d(input_, output_dim,
 
 def lstm(output):
     global x_hat, y_hat
-    out_shape = output[0].get_shape()[1]
     memory = Z_SIZE
     cell = rnn_cell.BasicLSTMCell(memory)
     cell = rnn_cell.MultiRNNCell([cell]*4)
     lstm_state = cell.zero_state(batch_size=BATCH_SIZE, dtype=tf.float32)
+    output = tf.reshape(output, [BATCH_SIZE, SEQ_LENGTH, Z_SIZE])
+    output = tf.split(1, SEQ_LENGTH, output)
+    output = [tf.reshape(o, [BATCH_SIZE, Z_SIZE]) for o in output]
     enc_inp = output
-    dec_inp = [tf.zeros_like(enc_inp[0], name="GO")]+ y_hat
+    #y_hat.reverse()
+    yt = tf.reshape(y_hat, [BATCH_SIZE, SEQ_LENGTH, Z_SIZE])
+    yt = tf.split(1, SEQ_LENGTH, yt)
+    dec_inp = [tf.zeros_like(enc_inp[0], name="GO")]+ ([tf.squeeze(yh) for yh in yt])
+    #y_hat.reverse()
     dec_outputs, dec_state = seq2seq.basic_rnn_seq2seq(enc_inp, dec_inp, cell)
     #dec_outputs, lstm_dec_state = rnn.rnn(cell, output,initial_state=lstm_state, dtype=tf.float32)
+    #dec_outputs, lstm_dec_state = seq2seq.rnn_decoder([tf.zeros_like(o) for o in dec_outputs], lstm_state, cell)
     print("dec_outputs  is", dec_outputs)
-    #dec_outputs = [linear(o, out_shape, 'RNN_dec_out'+str(i)) for i,o in enumerate(dec_outputs)]
-    #dec_outputs = [tf.nn.sigmoid(o) for o in dec_outputs]
+    dec_outputs = tf.concat(1, dec_outputs[:-1])
+
+    dec_outputs = tf.reshape(dec_outputs, [BATCH_SIZE*SEQ_LENGTH, Z_SIZE])
+    #dec_outputs = linear(dec_outputs, Z_SIZE, 'RNN_dec_out')
+    #dec_outputs = tf.nn.tanh(dec_outputs)
     x_hat = dec_outputs
     return dec_outputs
 
@@ -229,7 +237,6 @@ def lstm(output):
 
 def rnn_layer(output,layer_def, nextMethod):
     #output = [((o)) for o,o2 in zip(output[0], output[1])]
-    output = [(tf.nn.tanh(o)*tf.nn.sigmoid(o2)) for o,o2 in zip(output[0], output[1])]
     output = lstm(output)
 
     return output
@@ -241,30 +248,25 @@ def autoencoder(input, layer_def, nextMethod):
 
 loss_term = 0
 def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False):
-    output = tf.split(1, SEQ_LENGTH, input)
-    orig_output = output
+    output = input
+    output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, SIZE])
 
-    output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
-    output = [tf.reshape(o, [BATCH_SIZE, 32,16,1]) for o in output]
-    output = [conv2d(output[i], 64,name=name+'conv1', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
-    output = [tf.nn.relu(o) for o in output]
-    #output = [tf.nn.dropout(o, 0.9) for o in output]
-    output = [conv2d(output[i], 32,name=name+'conv2', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
-    output = [tf.nn.relu(o) for o in output]
-    output = [conv2d(output[i], 16,k_w=4, k_h=4, name=name+'conv3', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
+    output = wnn_encode(output, WAVELETS, name, reuse = reuse)
+    output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, 32,16,1])
+    output = conv2d(output, 64,name=name+'conv1', reuse=reuse )
+    output = tf.nn.tanh(output)
+    output = conv2d(output, 32,name=name+'conv2', reuse=reuse)
+    output = tf.nn.tanh(output)
+    output = conv2d(output, 16,k_w=4, k_h=4, name=name+'conv3', reuse=reuse)
 
-
-    #output = [tf.reshape(o, [BATCH_SIZE, -1]) for o in output]
-    output = [tf.reshape(o, [BATCH_SIZE, Z_SIZE]) for o in output]
-    #output = [linear(output[i], Z_SIZE, name=name+'convlin', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
-    print("OUTPUT DIM IS", output_dim)
+    output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, Z_SIZE])
 
 
-    extra = [wnn_encode(tf.squeeze(orig_output[i]), Z_SIZE, name+'z', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
     if nextMethod is not None:
-        output = nextMethod([output, extra])
+        output = nextMethod(output)
 
 
+    print("OUTPUT IS ", output)
     output = build_generator(output, reuse = reuse)
 
     wnn_encode_output = output
@@ -283,7 +285,7 @@ def deep_autoencoder(output, reuse=False):
     wavelets = WAVELETS
     z={}
     def nonlinear(output):
-        output = [tf.nn.tanh(o)*tf.nn.sigmoid(o2) for o,o2 in zip(output[0], output[1])]
+        output = tf.nn.tanh(output)
         #output = [tf.nn.dropout(o, 0.8) for o in output]
         z['value'] = output
         return output
@@ -296,29 +298,30 @@ def deep_autoencoder(output, reuse=False):
 def build_generator(output, reuse):
     name='l1'
     #print('output', output[0].get_shape())
-    #output = [linear(o,4*2*16,name+'linear_prj', reuse=reuse or (i>0),stddev=0.02) for i, o in enumerate(output)]
-    #output = [tf.nn.dropout(o, 0.5) for o in output]
-    #output = [tf.nn.relu(o) for o in output]
-    output = [tf.reshape(o, [BATCH_SIZE, 4,2,16]) for o in output]
-    output = [deconv2d(output[i], [BATCH_SIZE, 8, 4, 8], name=name+'deconv1', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
-    output = [tf.nn.tanh(o) for o in output]
-    output = [deconv2d(output[i], [BATCH_SIZE, 16, 8, 4], name=name+'deconv2', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
-    output = [tf.nn.tanh(o) for o in output]
-    output = [deconv2d(output[i], [BATCH_SIZE, 32, 16, 1], name=name+'deconv3', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
+    print(">>>>", output)
+    #output = tf.reshape(output, [BATCH_SIZE, Z_SIZE*SEQ_LENGTH])
+    output = linear(output,Z_SIZE,name+'linear_prj', reuse=reuse,stddev=0.2)
+    #output = tf.nn.dropout(output, 0.9)
+    output = tf.nn.tanh(output)
+    output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, 4,2,16])
+    output = deconv2d(output, [BATCH_SIZE*SEQ_LENGTH, 8, 4, 8], name=name+'deconv1', reuse = reuse)
+    output = tf.nn.tanh(output)
+    output = deconv2d(output, [BATCH_SIZE*SEQ_LENGTH, 16, 8, 4], name=name+'deconv2', reuse = reuse)
+    output = tf.nn.tanh(output)
 
-    output = [tf.reshape(o, [BATCH_SIZE, WAVELETS]) for o in output]
-    output = [wnn_decode(output[i], SIZE*CHANNELS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
-    output = [tf.reshape(o, [BATCH_SIZE, 1, CHANNELS, SIZE]) for o in output]
-    output = tf.concat(1, output)
+    output = deconv2d(output, [BATCH_SIZE*SEQ_LENGTH, 32, 16, 1], name=name+'deconv3', reuse = reuse)
+
+    output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, WAVELETS ])
+    output = wnn_decode(output, SIZE*CHANNELS, name, reuse = reuse)
+    output = tf.reshape(output, [BATCH_SIZE,SEQ_LENGTH, CHANNELS, SIZE])
     return output
 
 
 def discriminator(output, reuse=True):
     name='discriminator'
-    output = tf.split(1, SEQ_LENGTH, output)
-    output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, 'l1', reuse = True) for i in range(SEQ_LENGTH)]
-    output = tf.concat(1, output)
-    output = tf.reshape(output, [BATCH_SIZE, 32,16*SEQ_LENGTH,1])
+    output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, SIZE*CHANNELS])
+    output = wnn_encode(output, WAVELETS, 'l1', reuse = True)
+    output = tf.reshape(output, [BATCH_SIZE*SEQ_LENGTH, 32,16,1])
     output = conv2d(output, 32,name=name+'conv1', reuse=reuse)
     output = tf.nn.relu(output)
     output = conv2d(output, 16,name=name+'conv3', reuse=reuse)
@@ -362,17 +365,21 @@ def create(x,y):
     ys = get_entropy(y)
     sqs = tf.square(ys-d)
 
-    hats = [tf.square(y_h-x_h) for y_h,x_h in zip(y_hat, x_hat)]
-    hats = tf.add_n(hats)
+    x_hat = tf.reshape(x_hat, [BATCH_SIZE*SEQ_LENGTH, Z_SIZE])
+    y_hat = tf.reshape(y_hat, [BATCH_SIZE*SEQ_LENGTH, Z_SIZE])
+    hats = tf.square(y_hat-x_hat)
+    #hats = tf.nn.sigmoid_cross_entropy_with_logits(x_hat, y_hat)
 
+    #results['cost']=tf.sqrt(tf.reduce_sum(hats))
     results['cost']=tf.sqrt(tf.reduce_sum(hats))
 
-    results['pretrain_cost']=tf.sqrt(tf.reduce_sum(tf.square(x-autoencoded_x)))#+tf.reduce_mean(loss_term)
+    results['pretrain_cost']=tf.sqrt(tf.reduce_sum(tf.square(autoencoded_x-x)))#+tf.reduce_mean(loss_term)
 
-    gen = build_generator([tf.nn.tanh(tf.random_normal([BATCH_SIZE, Z_SIZE], mean=0, stddev=0.5)* \
-        tf.nn.sigmoid(tf.random_uniform([BATCH_SIZE,Z_SIZE],-6, 6))) \
-            for i in range(SEQ_LENGTH)], reuse=True)
-    real_d = discriminator(x, reuse=False)
+    uniforms = tf.random_uniform([BATCH_SIZE*SEQ_LENGTH,Z_SIZE],-1, 1)
+    print('uniforms', uniforms)
+    
+    gen = build_generator(uniforms, reuse=True)
+    real_d = discriminator(tf.reshape(x, gen.get_shape()), reuse=False)
     fake_d = discriminator(gen, reuse=True)
     # from https://arxiv.org/pdf/1604.07379v1.pdf
     # eq 2
@@ -514,17 +521,19 @@ def deep_gen():
                 decoded = None
                 batch = np.reshape(batch, [BATCH_SIZE, SEQ_LENGTH, SIZE, CHANNELS])
                 batch =np.swapaxes(batch, 2, 3)
+                predict = np.reshape(predict, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
+                predict = np.swapaxes(predict, 2, 3)
                 if(decoded is None):
                     decoded = batch# * 0.9 + np.random.uniform(-0.1, 0.1, batch.shape)
                 else:
                     decoded = batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
 
                 #batch += np.random.uniform(-0.1,0.1,batch.shape)
-                auto_x = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded, y: decoded})
-                g_sample = sess.run(autoencoder['g_sample'], feed_dict={x: decoded, y:decoded})
+                auto_x = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded, y: predict})
+                g_sample = sess.run(autoencoder['g_sample'], feed_dict={x: decoded, y:predict})
                 all_out.append(np.swapaxes(auto_x, 2, 3))
                 g_all_out.append(np.swapaxes(g_sample, 2, 3))
-                decoded_x = sess.run(autoencoder['decoded'], feed_dict={x: decoded, y:decoded})
+                decoded_x = sess.run(autoencoder['decoded'], feed_dict={x: decoded, y:predict})
                 decoded_all_out.append(np.swapaxes(decoded_x, 2, 3))
                 plt.clf()
 
@@ -611,6 +620,7 @@ def deep_pretrain(clobber=False):
                     epochs=TRAIN_REPEAT):
 
             pretrain_learn(batch, predict, sess, train_step, g_train_step, ac_train_step, x,None, i, autoencoder, saver)
+            #learn(batch, predict, sess, train_step, x,y,i, autoencoder, saver)
             i=i+1
 
 def save_or_load(sess, clobber):
