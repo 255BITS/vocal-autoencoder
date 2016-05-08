@@ -365,11 +365,7 @@ def create(x,y=None):
     d = get_entropy(results['decoded'])
     ys = get_entropy(y)
     sqs = tf.square(ys-d)
-
-    hats = [tf.square(y_h-x_h) for y_h,x_h in zip(y_hat, x_hat)]
-    hats = tf.add_n(hats)
-
-    results['cost']=tf.sqrt(tf.reduce_sum(hats))
+    results['cost']=tf.sqrt(tf.reduce_sum(sqs))
 
     results['pretrain_cost']=tf.sqrt(tf.reduce_sum(tf.square(x-autoencoded_x)))#+tf.reduce_mean(loss_term)
 
