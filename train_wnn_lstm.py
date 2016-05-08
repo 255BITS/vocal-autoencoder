@@ -123,7 +123,7 @@ def wnn_encode(input, wavelets, name, reuse=False):
             tf.get_variable_scope().reuse_variables()
         full_resolutions = math.log(wavelets*2)/math.log(2)
         tree = initial_dt_tree(-1,1, full_resolutions)
-        d_c = [(leaf[1])*100 for leaf in tree]
+        d_c = [(leaf[1])*64 for leaf in tree]
         d_c.append(0.01)
         t_c = [leaf[0] for leaf in tree]
         t_c.append(0.01)
@@ -134,12 +134,9 @@ def wnn_encode(input, wavelets, name, reuse=False):
         #translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
         #dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
-        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.05))
+        w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
         #w = tf.ones([dim_in, wavelets])
         input_proj = tf.mul(tf.sub(tf.matmul(input, w), translation),dilation)
-
-        #scales = tf.get_variable('scale_w',[wavelets], initializer=tf.random_normal_initializer(mean=1, stddev=0.01))
-        #input_proj = tf.mul(input_proj, scales)
         #killer = tf.greater(dilation, 0.02551225)
         #killer = tf.cast(killer, tf.float32)
         return mother(input_proj)#*killer
@@ -525,7 +522,7 @@ def deep_gen():
                 decoded_all_out.append(np.swapaxes(decoded, 2, 3))
         all_out = np.array(all_out)
         g_all_out = np.array(g_all_out)
-        decoded_all_out = np.array(decoded_all_out)
+        rnn_out = np.array(rnn_out)
         wavobj = get_wav('input.wav')
         wavobj['data']=np.reshape(all_out, [-1, CHANNELS])
         print(all_out)
