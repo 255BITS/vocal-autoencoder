@@ -7,10 +7,10 @@ from wav import get_wav
 
 queue = Queue()
 
-def each_batch(globPattern, batch_size, size, predict, epochs):
+def each_batch(globPattern, batch_size, size, predict, epochs, randomize=False):
     files = glob.glob(globPattern)
     for epoch in range(epochs):
-        load(files, batch_size, size, predict)
+        load(files, batch_size, size, predict, randomize)
         batch = True
         while(batch):
             batch = next_batch()
@@ -18,8 +18,8 @@ def each_batch(globPattern, batch_size, size, predict, epochs):
                 yield epoch, batch[0], batch[1]
 
 
-def load(files, batch_size, size, predict):
-    p = Process(target=add_to_queue, args=([files, batch_size, size, predict]))
+def load(files, batch_size, size, predict, randomize):
+    p = Process(target=add_to_queue, args=([files, batch_size, size, predict, randomize]))
     p.start()
 
 def get_batch(file, batch_size, size):
@@ -43,15 +43,32 @@ def get_predict(batches, i, batch_size, size, predict):
         return np.zeros([(batch_size*size)])
     return x[begin:end]
 
-def add_to_queue(files,batch_size, size, predict_x):
-    for filea in files:
-       batches = get_batch(filea, batch_size, size)#, get_batch(fileb)]
-       for i, batch in enumerate(batches):
-           while(queue.qsize() > 100):
-               time.sleep(0.1)
-           predict = get_predict(batches, i, batch_size, size, predict_x)
-           queue.put([batch, predict, i/len(batches[0]), 1.0/batch_size])
-       time.sleep(0.1)
+def add_to_queue(files,batch_size, size, predict_x, randomize):
+    print("RANDOMIZE", randomize)
+    if(randomize):
+        all_batches = get_batch(files[0], batch_size, size)#, get_batch(fileb)]
+        print("predict X", predict_x)
+        for j, filea in enumerate(files[1:]):
+           batches = get_batch(filea, batch_size, size)#, get_batch(fileb)]
+           all_batches = np.concatenate((batches, all_batches))
+           np.random.shuffle(all_batches)
+           if(j % 10 == 9):
+             for i, batch in enumerate(all_batches):
+                while(queue.qsize() > 100):
+                    time.sleep(0.1)
+                predict = get_predict(batches, i, batch_size, size, predict_x)
+                queue.put([batch, predict, i/len(batches[0]), 1.0/batch_size])
+             all_batches = get_batch(files[j+1], batch_size, size)#, get_batch(fileb)]
+    else:
+        for j, filea in enumerate(files):
+            batches = get_batch(filea, batch_size, size)#, get_batch(fileb)]
+            for i, batch in enumerate(batches):
+               while(queue.qsize() > 100):
+                   time.sleep(0.1)
+               predict = get_predict(batches, i, batch_size, size, predict_x)
+               queue.put([batch, predict, i/len(batches[0]), 1.0/batch_size])
+ 
+    time.sleep(0.1)
     queue.put("DONE")
 
 def next_batch():
