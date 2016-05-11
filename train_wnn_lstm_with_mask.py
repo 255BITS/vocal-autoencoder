@@ -35,7 +35,7 @@ MASK_OFFSET = 200
 PLOT_EVERY = 50
 SAVE_EVERY = 1000
 
-PREDICT=SEQ_LENGTH*BATCH_SIZE
+PREDICT=0
 SAVE_DIR='save'
 #BATCH_SIZE=349
 layers = [
@@ -130,13 +130,9 @@ def wnn_encode(input, wavelets, name, reuse=False, killer = None):
         d_c.append(0.01)
         t_c = [leaf[0] for leaf in tree]
         t_c.append(0.01)
-        t_c = np.tile(t_c,BATCH_SIZE)
-        d_c = np.tile(d_c,BATCH_SIZE)
-        translation = tf.reshape(tf.constant(t_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
-        dilation = tf.reshape(tf.constant(d_c, dtype=tf.float32), [BATCH_SIZE, wavelets])
-        translation = tf.get_variable('translation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(t_c))
-        dilation = tf.get_variable('dilation', [BATCH_SIZE, wavelets], initializer = tf.constant_initializer(d_c))
-        dilation = tf.abs(dilation)
+        translation = tf.get_variable('translation', [wavelets], initializer = tf.constant_initializer(t_c))
+        dilation = tf.get_variable('dilation', [wavelets], initializer = tf.constant_initializer(d_c))
+        #dilation = tf.abs(dilation)
         #w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.constant_initializer(0.001), trainable=False)
         w = tf.get_variable('w', [dim_in,wavelets], initializer=tf.random_normal_initializer(mean=0, stddev=0.01))
         #w = tf.ones([dim_in, wavelets])
@@ -244,12 +240,13 @@ def autoencoder(input, layer_def, nextMethod):
     return build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=True)
 
 loss_term = 0
-def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False):
+def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False, mask=True):
     output = tf.split(1, SEQ_LENGTH, input)
-    mask = [tf.concat(0, [tf.ones([MASK_OFFSET]),tf.zeros([MASK_SIZE]),tf.ones([SIZE-MASK_SIZE-MASK_OFFSET])]) for o in output]
-    mask = [tf.tile(m, [BATCH_SIZE]) for m in mask]
-    mask = [tf.reshape(m, [64, 1, 1, 1024]) for m in mask]
-    output = [tf.mul(m, o) for m, o in zip(mask, output)]
+    if(mask):
+        mask = [tf.concat(0, [tf.ones([MASK_OFFSET]),tf.zeros([MASK_SIZE]),tf.ones([SIZE-MASK_SIZE-MASK_OFFSET])]) for o in output]
+        mask = [tf.tile(m, [BATCH_SIZE]) for m in mask]
+        mask = [tf.reshape(m, output[0].get_shape()) for m in mask]
+        output = [tf.mul(m, o) for m, o in zip(mask, output)]
     orig_output = output
     output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
     output = [tf.reshape(o, [BATCH_SIZE, 32,16,1]) for o in output]
@@ -285,7 +282,7 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
     return output
 
 
-def deep_autoencoder(output, reuse=False):
+def deep_autoencoder(output, reuse=False, mask=True):
     name = 'l1'
     wavelets = WAVELETS
     z={}
@@ -295,7 +292,7 @@ def deep_autoencoder(output, reuse=False):
         z['value'] = output
         return output
     output_dim = int(output.get_shape()[3])
-    output = build_autoencoder(output, wavelets, name, output_dim, nonlinear, reuse=reuse)
+    output = build_autoencoder(output, wavelets, name, output_dim, nonlinear, reuse=reuse, mask=mask)
 
     return [output,z['value']]
 
@@ -345,8 +342,8 @@ def create(x,y=None):
         'autoencoder':autoencoder,
         'rnn':rnn_layer
     }
-    autoencoded_x, _ = deep_autoencoder(x)
-    _, y_hat = deep_autoencoder(y, reuse=True)
+    autoencoded_x, _ = deep_autoencoder(x, mask=False)
+    _, y_hat = deep_autoencoder(y, reuse=True, mask=False)
 
 
 
@@ -395,7 +392,7 @@ def create(x,y=None):
     results['adversarial_cost']=results['d_loss']+results['fake_loss']
     results['g_loss']=tf.reduce_mean(-tf.log(fake_d+eps))
     results['g_sample']=gen
-    results['joint_loss']=0.001*results['adversarial_cost']+0.999*results['pretrain_cost']
+    results['joint_loss']=0.001*results['adversarial_cost']+0.999*results['cost']
     results['autoencoded_x']=autoencoded_x
     return results
 
@@ -588,7 +585,8 @@ def deep_pretrain(clobber=False):
         sess = tf.Session()
 
         x = get_input()
-        autoencoder = create(x, get_y())
+        y = get_y()
+        autoencoder = create(x, y)
         create_cost_optimizer(autoencoder)
         train_step = create_pretrain_cost_optimizer(autoencoder)
         g_train_step = create_optim(autoencoder, 'g_loss', LEARNING_RATE_G_LOSS)
@@ -609,9 +607,9 @@ def deep_pretrain(clobber=False):
                     batch_size=BATCH_SIZE,
                     predict=PREDICT*SIZE,
                     epochs=TRAIN_REPEAT,
-                    randomize=True):
+                    randomize=False):
 
-            pretrain_learn(batch, predict, sess, train_step, g_train_step, ac_train_step, x,None, i, autoencoder, saver)
+            pretrain_learn(batch, predict, sess, train_step, g_train_step, ac_train_step, x,y, i, autoencoder, saver)
             i=i+1
 
 def save_or_load(sess, clobber):
