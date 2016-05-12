@@ -27,7 +27,7 @@ BATCH_SIZE=64
 WAVELETS=512
 Z_SIZE=128#WAVELETS//4
 CHANNELS = 1
-SEQ_LENGTH = 12
+SEQ_LENGTH = 3
 
 MASK_SIZE = 600
 MASK_OFFSET = 200
@@ -209,21 +209,26 @@ def conv2d(input_, output_dim,
 
 
 def lstm(output):
-    global x_hat, y_hat
+    global x_hat, y_hat, final_state, lstm_state
     out_shape = output[0].get_shape()[1]
     memory = Z_SIZE
     cell = rnn_cell.BasicLSTMCell(memory)
     cell = rnn_cell.MultiRNNCell([cell]*2)
-    lstm_state = cell.zero_state(batch_size=BATCH_SIZE, dtype=tf.float32)
     enc_inp = output
-    dec_inp = [tf.zeros_like(enc_inp[0], name="GO")]+ y_hat
-    dec_outputs, dec_state = seq2seq.basic_rnn_seq2seq(enc_inp, dec_inp, cell)
+    dec_inp = [tf.zeros_like(enc_inp[0], name="GO")]+ ([tf.squeeze(yh) for yh in y_hat])
+
+    lstm_state = cell.zero_state(batch_size=BATCH_SIZE, dtype=tf.float32)
     #dec_outputs, lstm_dec_state = rnn.rnn(cell, output,initial_state=lstm_state, dtype=tf.float32)
-    #print("dec_outputs  is", dec_outputs)
-    #dec_outputs = [linear(o, out_shape, 'RNN_dec_out'+str(i)) for i,o in enumerate(dec_outputs)]
-    #dec_outputs = [tf.nn.sigmoid(o) for o in dec_outputs]
-    x_hat = dec_outputs[:-1]
-    return dec_outputs[:-1]
+    #dec_outputs, lstm_dec_state = seq2seq.rnn_decoder(dec_inp, lstm_dec_state, cell)
+    dec_outputs, lstm_dec_state = seq2seq.basic_rnn_seq2seq(enc_inp, dec_inp, cell)
+    final_state = lstm_dec_state
+    print("dec_outputs  is", dec_outputs)
+    dec_outputs = [linear(o, out_shape, 'RNN_dec_out'+str(i), stddev=0.1) for i,o in enumerate(dec_outputs[:-1])]
+    dec_outputs = [tf.nn.tanh(o) for o in dec_outputs]
+    #x_hat = dec_outputs[:-1]
+    #return dec_outputs[:-1]
+    x_hat = dec_outputs
+    return dec_outputs
 
 
 
@@ -247,6 +252,9 @@ def build_autoencoder(input, wavelets, name, output_dim, nextMethod, reuse=False
         mask = [tf.tile(m, [BATCH_SIZE]) for m in mask]
         mask = [tf.reshape(m, output[0].get_shape()) for m in mask]
         output = [tf.mul(m, o) for m, o in zip(mask, output)]
+        print("Masked")
+    else:
+        print("Not Masked")
     orig_output = output
     output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, name, reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
     output = [tf.reshape(o, [BATCH_SIZE, 32,16,1]) for o in output]
@@ -300,9 +308,9 @@ def deep_autoencoder(output, reuse=False, mask=True):
 def build_generator(output, reuse):
     name='l1'
     #print('output', output[0].get_shape())
-    #output = [linear(o,4*2*16,name+'linear_prj', reuse=reuse or (i>0),stddev=0.02) for i, o in enumerate(output)]
-    #output = [tf.nn.dropout(o, 0.5) for o in output]
-    #output = [tf.nn.relu(o) for o in output]
+    output = [linear(o,Z_SIZE,name+'linear_prj', reuse=reuse or (i>0),stddev=0.02) for i, o in enumerate(output)]
+    output = [tf.nn.dropout(o, 0.9) for o in output]
+    output = [tf.nn.tanh(o) for o in output]
     output = [tf.reshape(o, [BATCH_SIZE, 4,2,16]) for o in output]
     output = [deconv2d(output[i], [BATCH_SIZE, 8, 4, 8], name=name+'deconv1', reuse = reuse or (i>0)) for i in range(SEQ_LENGTH)]
     output = [tf.nn.tanh(o) for o in output]
@@ -320,6 +328,11 @@ def build_generator(output, reuse):
 def discriminator(output, reuse=True):
     name='discriminator'
     output = tf.split(1, SEQ_LENGTH, output)
+    #mask = [tf.concat(0, [tf.zeros([MASK_OFFSET]),tf.ones([MASK_SIZE]),tf.zeros([SIZE-MASK_SIZE-MASK_OFFSET])]) for o in output]
+    #mask = [tf.tile(m, [BATCH_SIZE]) for m in mask]
+    #mask = [tf.reshape(m, output[0].get_shape()) for m in mask]
+    #output = [tf.mul(m, o) for m, o in zip(mask, output)]
+
     output = [wnn_encode(tf.squeeze(output[i]), WAVELETS, 'l1', reuse = True, killer = 1) for i in range(SEQ_LENGTH)]
     output = [tf.reshape(o, [BATCH_SIZE, 32,16,1]) for o in output]
     output = [conv2d(output[i], 32,name=name+'conv1', reuse=reuse or i > 0) for i in range(SEQ_LENGTH)]
@@ -342,11 +355,14 @@ def create(x,y=None):
         'autoencoder':autoencoder,
         'rnn':rnn_layer
     }
+    print("build x`")
     autoencoded_x, _ = deep_autoencoder(x, mask=False)
+    print("build y`")
     _, y_hat = deep_autoencoder(y, reuse=True, mask=False)
 
 
 
+    print("build rnn")
     results = {}
     def nextMethod(current_layer):
         global layer_index
@@ -358,6 +374,8 @@ def create(x,y=None):
 
     #flat_x = tf.reshape(x, [BATCH_SIZE, -1])
     decoded = ops[layers[0]['type']](x,layers[0], nextMethod)
+
+    print("Finished graph construction")
 
     #reconstructed_x = tf.reshape(output, [BATCH_SIZE, SEQ_LENGTH, CHANNELS,SIZE])
     results['decoded']=tf.reshape(decoded, [BATCH_SIZE, SEQ_LENGTH, CHANNELS,SIZE])
@@ -371,7 +389,7 @@ def create(x,y=None):
     hats = [tf.square(y_h-x_h) for y_h,x_h in zip(y_hat, x_hat)]
     hats = tf.add_n(hats)
 
-    results['cost']=tf.sqrt(tf.reduce_sum(hats))
+    results['cost']=tf.sqrt(tf.reduce_sum(sqs))
 
     #ones = [tf.ones_like(y_h) for y_h in y_hat]
 
@@ -392,7 +410,9 @@ def create(x,y=None):
     results['adversarial_cost']=results['d_loss']+results['fake_loss']
     results['g_loss']=tf.reduce_mean(-tf.log(fake_d+eps))
     results['g_sample']=gen
-    results['joint_loss']=0.001*results['adversarial_cost']+0.999*results['cost']
+    joint_coeff = 0.999
+    results['joint_loss']=(1-joint_coeff)*results['adversarial_cost']+joint_coeff*results['cost']*0.1+joint_coeff*results['pretrain_cost']*0.9
+    #results['joint_loss']=results['pretrain_cost']
     results['autoencoded_x']=autoencoded_x
     return results
 
@@ -453,19 +473,21 @@ def learn(batch, predict, sess, train_step, x, y,k, autoencoder, saver):
 
     print(" cost", cost, k)
 
+state = None
 def pretrain_learn(batch, predict, sess, train_step, g_train_step, ac_train_step, x, y,k, autoencoder, saver):
     batch = np.reshape(batch, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
     batch = np.swapaxes(batch, 2, 3)
+    predict = np.reshape(predict, [BATCH_SIZE, SEQ_LENGTH, SIZE,CHANNELS])
+    predict = np.swapaxes(predict, 2, 3)
  
-    #_, cost, decoded = sess.run([train_step,autoencoder['pretrain_cost'], autoencoder['autoencoded_x']], feed_dict={x: batch})
-    #_ = sess.run([ac_train_step], feed_dict={x: batch})
-    #g_loss, g_sample, d_loss, d_fake_loss = [0, np.zeros_like(batch), 0, 0]
-    #_, g_loss, g_sample = sess.run([g_train_step,autoencoder['g_loss']], feed_dict={x: batch})
-    #_ = sess.run([train_step], feed_dict={x: batch})
-    _, = sess.run([ac_train_step ], feed_dict={x: batch})
-    cost, decoded, d_loss, d_fake_loss = sess.run([autoencoder['pretrain_cost'], autoencoder['autoencoded_x'],
-        autoencoder['d_loss'], autoencoder['fake_loss']], feed_dict={x: batch})
-    g_loss, g_sample = sess.run([ autoencoder['g_loss'], autoencoder['g_sample']], feed_dict={x: batch})
+    global lstm_state,final_state, state
+    if(state is None):
+        state = sess.run(lstm_state)
+
+    _,state = sess.run([ac_train_step, final_state], feed_dict={x: batch, y:predict, lstm_state:state})
+    cost, decoded, autoencoded_x, d_loss, d_fake_loss = sess.run([autoencoder['pretrain_cost'], autoencoder['decoded'], autoencoder['autoencoded_x'],
+        autoencoder['d_loss'], autoencoder['fake_loss']], feed_dict={x: batch, y:predict})
+    g_loss, g_sample = sess.run([ autoencoder['g_loss'], autoencoder['g_sample']], feed_dict={x: batch, y:predict})
 
 
     if((k) % PLOT_EVERY == 3):
@@ -481,6 +503,7 @@ def pretrain_learn(batch, predict, sess, train_step, g_train_step, ac_train_step
         g_plot = np.reshape(g_sample[0,0,0,:], [-1])
         plt.plot(g_plot+np.ones_like(g_plot))
         plt.plot(np.reshape(decoded[0,0,0,:], [-1]))
+        plt.plot(autoencoded_x[0,0,0,:]-np.ones_like(autoencoded_x[0,0,0,:]))
         print("SHAPE IS", g_sample.shape, decoded.shape)
         plt.savefig('visualize/input-'+str(k)+'.png')
     if((k)%SAVE_EVERY==99):
@@ -528,7 +551,7 @@ def deep_gen():
                 if(decoded is None):
                     decoded = batch# * 0.9 + np.random.uniform(-0.1, 0.1, batch.shape)
                 else:
-                    decoded = decoded#batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
+                    decoded = batch# * 0.1 + batch*0.8# + np.random.uniform(-0.1, 0.1, batch.shape)
 
                 #batch += np.random.uniform(-0.1,0.1,batch.shape)
                 x_sample = sess.run(autoencoder['autoencoded_x'], feed_dict={x: decoded, y:predict})
